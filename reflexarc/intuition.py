@@ -182,6 +182,9 @@ class LayaIntuition:
         if path:
             cands.append(Path(path))
         cands.append(state_dir() / "calibration.json")
+        # shipped calibration measured against the typed-decisions checkpoint
+        cands.append(Path(__file__).resolve().parent / "data"
+                     / "calibration_typed_decisions.json")
         for c in cands:
             try:
                 if c.exists():
