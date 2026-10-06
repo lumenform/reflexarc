@@ -1,0 +1,40 @@
+{
+ "model_key": "typed-decisions",
+ "model_dir": "D:\\codex\u5927\u80c6\u5c1d\u8bd5\u9879\u76ee\\reflexarc\\models\\laya-typed",
+ "n": 48,
+ "stats": {
+  "rest": {
+   "mean": 0.1913,
+   "std": 0.0403
+  },
+  "walk": {
+   "mean": 0.4815,
+   "std": 0.0586
+  },
+  "watch": {
+   "mean": 0.306,
+   "std": 0.2077
+  },
+  "mirror": {
+   "mean": 0.4322,
+   "std": 0.1555
+  },
+  "cheer": {
+   "mean": 0.2424,
+   "std": 0.0686
+  },
+  "seek": {
+   "mean": 0.2822,
+   "std": 0.0791
+  },
+  "overwhelmed": {
+   "mean": 0.3248,
+   "std": 0.0831
+  },
+  "ponder": {
+   "mean": 0.1091,
+   "std": 0.0608
+  }
+ },
+ "created": "2026-10-06 20:54:16"
+}

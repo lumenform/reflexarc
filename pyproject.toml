@@ -25,4 +25,4 @@ gui = ["PySide6>=6.6", "psutil>=5.9"]
 intuition = ["laya>=0.3.28"]
 
 [project.scripts]
-reflexarc = "run:main"
+reflexarc = "reflexarc.cli:main"

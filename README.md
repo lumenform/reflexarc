@@ -1,5 +1,7 @@
 # ReflexArc 反射弧
 
+English | [中文](README.zh-CN.md)
+
 **A nervous system for desktop pets.**
 
 Desktop pets today either play scripted loops or call an LLM when you poke them. Both feel dead. ReflexArc gives a pet a working reflex arc instead:
