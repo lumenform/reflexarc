@@ -110,6 +110,26 @@ def record_loop(stop_event: threading.Event) -> None:
             writer.close()
 
 
+def force_english_input() -> None:
+    """Make sure the active keyboard layout is plain English (US) so every
+    keystroke lands literally instead of through an IME."""
+    import ctypes, ctypes.wintypes
+    user32 = ctypes.windll.user32
+    hkl = user32.LoadKeyboardLayoutW("00000409", 1)  # KLF_ACTIVATE
+    if not hkl:
+        return
+    user32.ActivateKeyboardLayout(hkl, 0)
+    # also tell every top-level window to switch to it (esp. notepad)
+    WM_INPUTLANGCHANGEREQUEST = 0x0050
+    hwnds = []
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+    def cb(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            user32.PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, hkl)
+        return True
+    user32.EnumWindows(cb, 0)
+
+
 def type_code(seconds: float) -> None:
     """Type real keystrokes (only ASCII) with human-ish rhythm."""
     end = time.time() + seconds
@@ -170,6 +190,8 @@ def main() -> None:
             time.sleep(0.2)
 
         print("[phase] typing (40s)", flush=True)
+        force_english_input()
+        time.sleep(0.5)
         type_code(40)
 
         print("[phase] cpu stress on (95s: 35s typing + 60s stopped)", flush=True)
