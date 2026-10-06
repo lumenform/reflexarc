@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+state/
+.cache/
+dist/
+build/
+*.egg-info/
+pets/*
+!pets/.gitkeep
+models/
+docs/*.mp4
+
