@@ -6,6 +6,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 from pathlib import Path
 
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
@@ -14,12 +16,12 @@ app = QGuiApplication(sys.argv[:1])
 
 from reflexarc.render import SpriteSheet, ROWS
 
-pet_dir = Path(__file__).resolve().parent / "pets" / "boba"
+pet_dir = Path(__file__).resolve().parents[1] / "pets" / "boba"
 sprites = SpriteSheet(pet_dir)
 print("cell:", sprites.cell_w, "x", sprites.cell_h,
       "rows:", sprites.rows_count)
 
-out = Path(__file__).resolve().parent / "state"
+out = Path(__file__).resolve().parents[1] / "state"
 out.mkdir(exist_ok=True)
 
 contact = QImage(sprites.cell_w * len(ROWS), sprites.cell_h,

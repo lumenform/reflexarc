@@ -3,6 +3,8 @@ then quit. Also drives a speed-up so several intents appear quickly."""
 from __future__ import annotations
 
 import sys
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -14,7 +16,7 @@ from reflexarc.sim import Simulation
 app = QApplication(sys.argv[:1])
 app.setQuitOnLastWindowClosed(False)
 
-sprites = SpriteSheet(Path(__file__).resolve().parent / "pets" / "boba")
+sprites = SpriteSheet(Path(__file__).resolve().parents[1] / "pets" / "boba")
 sim = Simulation(seed=3, fresh=True, pet_name="Boba")
 win = PetWindow(sim, sprites, scale=1.25)
 win.show()

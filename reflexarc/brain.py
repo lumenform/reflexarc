@@ -96,7 +96,7 @@ def instinct_scores(obs: Observation, d: Drives, p: Personality) -> dict[Intent,
     s[Intent.REST] = (
         2.4 * (tired ** 1.5)
         + 0.65 * nf * (1.0 - 0.6 * p.night_owl)
-        + 0.50 * long_idle * (1.0 - 0.55 * p.curiosity)
+        + 0.40 * long_idle * (1.0 - 0.55 * p.curiosity)
         - 0.45 * a * p.clinginess
     )
     walk_base = (
@@ -125,7 +125,7 @@ def instinct_scores(obs: Observation, d: Drives, p: Personality) -> dict[Intent,
     )
     s[Intent.SEEK_ATTENTION] = (
         1.9 * d.social_hunger * (0.5 + 0.5 * p.clinginess)
-        + 0.7 * long_idle * (0.4 + 0.6 * p.clinginess)
+        + 0.9 * long_idle * (0.4 + 0.6 * p.clinginess)
         - 0.6 * d.stress
     )
     s[Intent.OVERWHELMED] = (
@@ -134,8 +134,8 @@ def instinct_scores(obs: Observation, d: Drives, p: Personality) -> dict[Intent,
         + 0.4 * max(0.0, 0.2 - d.energy)
     )
     s[Intent.PONDER] = (
-        0.78 * p.curiosity * (1.0 - 0.85 * a)
-        + (0.30 if mindy else 0.0)
+        0.70 * p.curiosity * (1.0 - 0.85 * a)
+        + (0.24 if mindy else 0.0)
         + 0.15 * (1.0 - d.boredom)
         - 0.5 * d.stress
         - 0.5 * long_idle
@@ -165,6 +165,7 @@ class Brain:
         self.current: Intent = Intent.REST
         self.time_left: float = 1.0
         self._cooldowns: dict[Intent, float] = {i: 0.0 for i in Intent}
+        self._streak: int = 0
 
     def tick(self, dt: float) -> None:
         for k in self._cooldowns:
@@ -204,11 +205,20 @@ class Brain:
         elif self.current is Intent.WALK_LEFT:
             scores[Intent.WALK_RIGHT] += 0.22
 
+        # anti-monotony: repeating one behaviour over and over gets stale
+        if self._streak > 3:
+            scores[self.current] -= 0.03 * min(12, self._streak - 3)
+
         best = max(scores, key=scores.get)  # type: ignore[arg-type]
         cur = self.current
         margin = scores[best] - scores.get(cur, -9.9)
         if best != cur and margin < self.hysteresis and self.time_left > -6.0:
             best = cur  # stay a little longer
+
+        if best == self.current:
+            self._streak += 1
+        else:
+            self._streak = 0
 
         lo, hi, cd = TIMING[best]
         duration = self.rng.uniform(lo, hi)

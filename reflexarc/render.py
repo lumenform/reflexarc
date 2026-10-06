@@ -224,8 +224,6 @@ def main(args) -> int:
 
     sim = Simulation(seed=args.seed, intuition=intuition,
                      fresh=args.fresh, pet_name=sprites.meta.get("displayName", args.name))
-    if intuition is not None:
-        intuition.bind(sim)
 
     win = PetWindow(sim, sprites, scale=getattr(args, "scale", 1.0))
 

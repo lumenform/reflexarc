@@ -88,7 +88,31 @@ class Simulation:
             decision = self.brain.decide(obs, self.drives)
             self._last_decision = decision
             self._last_decision_ts = now
+            self._behaviour_feedback(decision)
         return decision
+
+    # ------------------------------------------------------------------
+    def _behaviour_feedback(self, decision: Decision) -> None:
+        """Acting on a drive satisfies it a little. Rates are per hour of the
+        chosen behaviour, so fast decisions do not drain drives instantly."""
+        from .brain import Intent
+        d = self.drives
+        i = decision.intent
+        dh = max(0.0, decision.duration) / 3600.0
+        if i is Intent.SEEK_ATTENTION:
+            d.social_hunger = max(0.0, d.social_hunger - 12.0 * dh)
+            d.boredom = max(0.0, d.boredom - 1.0 * dh)
+        elif i in (Intent.WALK_LEFT, Intent.WALK_RIGHT):
+            d.boredom = max(0.0, d.boredom - 1.5 * dh)
+        elif i is Intent.REST:
+            d.energy = min(1.0, d.energy + 1.0 * dh)
+        elif i in (Intent.WATCH_USER, Intent.MIRROR_WORK):
+            d.social_hunger = max(0.0, d.social_hunger - 2.5 * dh)
+        elif i is Intent.CHEER:
+            d.mood = min(1.0, d.mood + 6.0 * dh)
+            d.boredom = max(0.0, d.boredom - 2.0 * dh)
+        elif i is Intent.PONDER:
+            d.boredom = max(0.0, d.boredom - 0.15 * dh)
 
     # ------------------------------------------------------------------
     def snapshot(self, now: float | None = None) -> Snapshot:

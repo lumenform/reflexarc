@@ -6,7 +6,7 @@ Not a unit test suite - a behavioural sanity check with printed evidence.
 from __future__ import annotations
 
 import os
-os.environ.setdefault("REFLEXARC_HOME", os.path.join(os.path.dirname(__file__), "state"))
+os.environ.setdefault("REFLEXARC_HOME", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state"))
 
 import time as _time
 from collections import Counter
@@ -56,7 +56,7 @@ def main() -> None:
               f"A={d.attachment:.2f} S={d.stress:.2f} H={d.social_hunger:.2f} "
               f"| night_owl={sim.persona.night_owl:.2f} | {top}")
     sim.save()
-    print("saved state ->", os.path.join(os.path.dirname(__file__), "state"))
+    print("saved state ->", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state"))
 
 
 if __name__ == "__main__":

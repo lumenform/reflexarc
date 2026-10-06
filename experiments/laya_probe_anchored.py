@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from laya import Router, decide
 
-MODEL_DIR = Path(__file__).resolve().parent / "models" / "laya-multilingual"
+MODEL_DIR = Path(__file__).resolve().parents[1] / "models" / "laya-multilingual"
 router = Router(models={"multilingual": str(MODEL_DIR)}, device="cpu")
 
 ANCHORS = {

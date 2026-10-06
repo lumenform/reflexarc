@@ -59,7 +59,7 @@ class Drives:
             self.social_hunger -= 0.50 * h
         else:
             self.attachment -= 0.05 * h
-            self.social_hunger += 0.18 * h * (0.5 + p.clinginess)
+            self.social_hunger += 0.22 * h * (0.5 + p.clinginess)
 
         # --- stress -------------------------------------------------------
         env_stress = max(0.0, obs.cpu - 0.65) * 1.4 * (0.35 + 0.65 * obs.activity)
