@@ -8,5 +8,6 @@ build/
 pets/*
 !pets/.gitkeep
 models/
-docs/*.mp4
+docs/demo_real_raw.mp4
+docs/consult_claude.md
 

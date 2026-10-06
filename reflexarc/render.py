@@ -6,6 +6,8 @@ the bottom of the screen when the brain asks for it.
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import json
 import sys
 import time
@@ -88,6 +90,7 @@ class PetWindow(QWidget):
         self.w = int(self.sprites.cell_w * scale)
         self.h = int(self.sprites.cell_h * scale)
 
+        self.setWindowTitle("ReflexArc")
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
@@ -100,8 +103,15 @@ class PetWindow(QWidget):
 
         # position: restore saved or start bottom-right
         screen = QApplication.primaryScreen().availableGeometry()
-        self.pet_x = float(self.sim.extra.get("x", screen.right() - self.w - 80))
-        self.pet_y = float(screen.bottom() - self.h - 8)
+        import os as _os
+        fx = _os.environ.get("REFLEXARC_FORCE_X")
+        fy = _os.environ.get("REFLEXARC_FORCE_Y")
+        if fx is not None and fy is not None:
+            self.pet_x = float(fx)
+            self.pet_y = float(fy)
+        else:
+            self.pet_x = float(self.sim.extra.get("x", screen.right() - self.w - 80))
+            self.pet_y = float(screen.bottom() - self.h - 8)
         self._screen = screen
         self.move(int(self.pet_x), int(self.pet_y))
 
@@ -110,6 +120,11 @@ class PetWindow(QWidget):
         self._last_t = time.time()
         self._senses_tick = 0
         self._paused = False
+        self._mouse_was_down = False
+        self._last_touch_ts = 0.0
+
+        if not self.sim.stats.first_seen:
+            self.sim.stats.first_seen = time.time()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -131,6 +146,7 @@ class PetWindow(QWidget):
         if obs is None:
             return
 
+        self._check_touch(now)
         self.sim.step(obs, now)
         snap = self.sim.snapshot(now)
         target_row = snap.petdex_row
@@ -161,6 +177,27 @@ class PetWindow(QWidget):
         fps = ROW_FPS.get(self._row, 6.0)
         self._frame_idx += dt * fps
         self.update()
+
+    def _check_touch(self, now: float) -> None:
+        """The window is click-through so it never blocks the desktop, but we
+        still read the global cursor: hovering over the sprite and clicking is
+        a pet-pet."""
+        try:
+            user32 = ctypes.windll.user32
+            pt = ctypes.wintypes.POINT()
+            if not user32.GetCursorPos(ctypes.byref(pt)):
+                return
+            gx, gy = pt.x, pt.y
+            inside = (self.x() <= gx < self.x() + self.width()
+                      and self.y() <= gy < self.y() + self.height())
+            down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+            if inside and down and not self._mouse_was_down \
+                    and (now - self._last_touch_ts) > 1.8:
+                self._last_touch_ts = now
+                self.sim.on_pet()
+            self._mouse_was_down = down
+        except (OSError, AttributeError):
+            pass
 
     def paintEvent(self, event) -> None:  # noqa: N802
         pm = self.sprites.frame(self._row, int(self._frame_idx))

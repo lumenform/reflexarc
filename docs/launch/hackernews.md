@@ -1,8 +1,13 @@
 # Show HN draft
 
-**Title:** Show HN: ReflexArc - desktop pets with a nervous system (no LLM chat)
+**Title:** Show HN: ReflexArc - a desktop pet you raise, not install (homeostasis, no LLM chat)
 
 **Body:**
+
+Your desktop pet is not installed - it is raised. No chat, no LLM calls: it has
+homeostatic drives and a reflex arc. Mine mirrors late-night typing, gets dizzy
+when the CPU melts down, waves when ignored, and turned into a night owl because
+I am one. 96-second real screen recording (not a mockup) in the link.
 
 I have been playing with two open-source projects and ended up welding them together:
 

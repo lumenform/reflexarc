@@ -64,7 +64,7 @@ class Drives:
         # --- stress -------------------------------------------------------
         env_stress = max(0.0, obs.cpu - 0.65) * 1.4 * (0.35 + 0.65 * obs.activity)
         target_stress = env_stress
-        k = 1.0 / (600.0 * (0.5 + p.resilience))  # relax toward target
+        k = 1.0 / (60.0 * (0.5 + p.resilience))   # machines overheat in minutes
         self.stress += (target_stress - self.stress) * dt * k
 
         # --- mood (EMA toward a target) ------------------------------------

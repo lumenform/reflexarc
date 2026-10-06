@@ -2,9 +2,12 @@
 
 English | [中文](README.zh-CN.md)
 
-**A nervous system for desktop pets.**
+**Your desktop pet is not installed. It is raised.**
 
-Desktop pets today either play scripted loops or call an LLM when you poke them. Both feel dead. ReflexArc gives a pet a working reflex arc instead:
+It does not chat. It does not call an LLM. It *lives* next to you: mirrors your
+late-night typing, gets dizzy when the CPU melts down, waves when you have been
+gone too long - and slowly turns into a night owl, because you are one.
+ReflexArc gives a pet a working reflex arc instead of a script:
 
 ```
   sensors              nervous centre               effectors
@@ -26,7 +29,11 @@ Desktop pets today either play scripted loops or call an LLM when you poke them.
 
 The pet never chats. It just *lives* next to you: gets sleepy at 1am, paces when bored, mirrors your deep work, waves when you have been gone too long, gets dizzy when your CPU melts down.
 
-![demo](docs/demo.gif)
+**Real recording, no mockups** (96s: typing -> CPU pinned -> petting; mid-section at 3x):
+
+[![demo](docs/demo_real.gif)](docs/demo_real.mp4)
+
+*Full clip: [docs/demo_real.mp4](docs/demo_real.mp4) (4 MB) - it is one continuous real screen capture, the pet is a live Python process on the right.*
 
 ## Assembled from
 
@@ -69,7 +76,7 @@ From `tests/scenario.py` - the same pet fast-forwarded across a simulated day:
 | Afternoon dip | stares into the distance (355), some walking, rare cheer |
 | Evening video session | sits and watches the user (220) |
 | 23:30 grind | stays close and watches (281), occasionally mirrors the work |
-| CPU storm (97%) | dizzy/overwhelmed (106) interleaved with stubbornly mirroring you (87) |
+| CPU storm (97%) | dizzy/overwhelmed (221) - it panics long before your fans do (mirror drops to 27) |
 | Left alone for hours | paces (361), sleeps (71), waves for you sometimes (15) |
 
 All counts come from real simulation runs with feedback loops active: behaviours
@@ -127,7 +134,8 @@ python run.py [--headless] [--duration N] [--fresh] [--seed N]
 ## Status / roadmap
 
 - [x] v0.1 - reflex arc, homeostatic drives, nine behaviours, transparent GUI, petdex format, calibrated intuition
-- [ ] click/touch interaction (pet the pet)
+- [x] petting - hover the sprite and click (the window is click-through, but the pet still feels you). It gets calmer and happier; wake it from a nap and it waves at you
+- [ ] shareable personality report card ("it became a night owl in 7 days")
 - [ ] multi-pet: two pets, two machines, one shared desktop
 - [ ] agent hooks: react when your coding agent finishes or fails
 - [ ] sound (subtle, off by default)

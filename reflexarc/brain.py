@@ -167,6 +167,12 @@ class Brain:
         self._cooldowns: dict[Intent, float] = {i: 0.0 for i in Intent}
         self._streak: int = 0
 
+    def interrupt(self, intent: Intent, duration: float) -> None:
+        """An external event (being petted, a loud failure...) takes control
+        for a moment, then normal decision making resumes."""
+        self.current = intent
+        self.time_left = duration
+
     def tick(self, dt: float) -> None:
         for k in self._cooldowns:
             if self._cooldowns[k] > 0:

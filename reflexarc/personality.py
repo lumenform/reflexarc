@@ -60,6 +60,8 @@ class Stats:
     active_samples: int = 0
     night_samples: int = 0
     night_active_samples: int = 0
+    pets_received: int = 0
+    first_seen: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)

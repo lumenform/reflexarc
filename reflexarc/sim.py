@@ -92,6 +92,21 @@ class Simulation:
         return decision
 
     # ------------------------------------------------------------------
+    def on_pet(self) -> None:
+        """The user touched the pet (mouse over sprite + click). Keep the
+        window click-through but still feel the affection."""
+        from .brain import Intent
+        d = self.drives
+        d.mood = min(1.0, d.mood + 0.10)
+        d.attachment = min(1.0, d.attachment + 0.06)
+        d.social_hunger = max(0.0, d.social_hunger - 0.25)
+        d.stress = max(0.0, d.stress - 0.12)
+        self.stats.pets_received += 1
+        was_resting = self.brain.current is Intent.REST
+        reaction = Intent.SEEK_ATTENTION if was_resting else Intent.CHEER
+        self.brain.interrupt(reaction, 1.8)
+
+    # ------------------------------------------------------------------
     def _behaviour_feedback(self, decision: Decision) -> None:
         """Acting on a drive satisfies it a little. Rates are per hour of the
         chosen behaviour, so fast decisions do not drain drives instantly."""
