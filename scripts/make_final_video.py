@@ -17,7 +17,6 @@ RAW = ROOT / "docs" / "demo_real_raw.mp4"
 OUT_MP4 = ROOT / "docs" / "demo_real.mp4"
 OUT_GIF = ROOT / "docs" / "demo_real.gif"
 
-FPS = 10
 SPEEDUP_START, SPEEDUP_END, SPEED = 46.0, 134.0, 3
 
 CAPTIONS = [
@@ -62,6 +61,7 @@ def draw_caption(rgb: np.ndarray, text: str) -> np.ndarray:
 
 def main() -> None:
     cap = cv2.VideoCapture(str(RAW))
+    FPS = cap.get(cv2.CAP_PROP_FPS) or 20.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frames: list[np.ndarray] = []
     times: list[float] = []
@@ -77,9 +77,10 @@ def main() -> None:
         frames.append(draw_caption(rgb, caption_for(t)))
         times.append(t)
     cap.release()
-    print(f"kept {len(frames)} of {total} frames (~{len(frames)/FPS:.0f}s)")
+    out_fps = float(FPS)
+    print(f"kept {len(frames)} of {total} frames (~{len(frames)/out_fps:.0f}s @ {out_fps:.0f}fps)")
 
-    w = imageio.get_writer(str(OUT_MP4), fps=FPS, codec="libx264",
+    w = imageio.get_writer(str(OUT_MP4), fps=out_fps, codec="libx264",
                            quality=7, macro_block_size=None,
                            ffmpeg_log_level="error")
     for fr in frames:
@@ -98,7 +99,7 @@ def main() -> None:
             gif_frames.append(im.convert("P", palette=Image.ADAPTIVE, colors=128))
     if gif_frames:
         gif_frames[0].save(OUT_GIF, save_all=True, append_images=gif_frames[1:],
-                           duration=200, loop=0, optimize=True)
+                           duration=int(1000 / out_fps * 2), loop=0, optimize=True)
         print("gif ->", OUT_GIF, f"{OUT_GIF.stat().st_size/1024/1024:.1f}MB")
 
 

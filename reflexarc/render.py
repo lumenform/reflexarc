@@ -42,6 +42,27 @@ FRAMES_PER_ROW = 8
 CELL_W, CELL_H = 192, 208
 
 
+def _count_valid_frames(frames: list[QPixmap]) -> int:
+    """petdex sheets pad rows with fully transparent frames (jumping has 5,
+    waving has 4...). Count the non-empty prefix so animation never blinks
+    out."""
+    count = 0
+    for pm in frames:
+        img = pm.toImage()
+        opaque = 0
+        total = 0
+        for y in range(0, img.height(), 16):
+            for x in range(0, img.width(), 16):
+                total += 1
+                if img.pixelColor(x, y).alpha() > 20:
+                    opaque += 1
+        if total and opaque > total * 0.02:
+            count += 1
+        else:
+            break
+    return max(1, count)
+
+
 class SpriteSheet:
     def __init__(self, pet_dir: Path) -> None:
         meta_path = pet_dir / "pet.json"
@@ -64,6 +85,7 @@ class SpriteSheet:
         self.rows_count = max(1, img.height() // CELL_H)
         self.cell_h = img.height() // self.rows_count
         self.frames: dict[str, list[QPixmap]] = {}
+        self.frame_counts: dict[str, int] = {}
         for r, name in enumerate(ROWS):
             if r >= self.rows_count:
                 break
@@ -74,11 +96,13 @@ class SpriteSheet:
                              self.cell_w, self.cell_h))
                 frames.append(pm)
             self.frames[name] = frames
+            self.frame_counts[name] = _count_valid_frames(frames)
         self.default_frames = self.frames.get("idle") or next(iter(self.frames.values()))
 
     def frame(self, row: str, index: int) -> QPixmap:
         frames = self.frames.get(row, self.default_frames)
-        return frames[index % len(frames)]
+        n = self.frame_counts.get(row, len(frames))
+        return frames[int(index) % max(1, n)]
 
 
 class PetWindow(QWidget):

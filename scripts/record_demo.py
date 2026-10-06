@@ -33,7 +33,7 @@ pyautogui.FAILSAFE = False
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "demo_real_raw.mp4"
 OUT_W, OUT_H = 1920, 1080
-FPS = 10
+FPS = 20
 
 PET_SCALE = 1.25                   # physical sprite is 480x520 on this 200% display
 
@@ -51,26 +51,55 @@ def find_pet_center() -> tuple[int, int] | None:
     return ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
 
 CODE_LINES = [
-    "# day 6 with my desktop pet",
-    "class Boba:",
-    "    def __init__(self):",
-    "        self.energy = 0.75",
-    "        self.boredom = 0.25",
+    "# reflexarc - a nervous system for a tiny desktop creature",
+    "import time",
+    "from dataclasses import dataclass",
     "",
-    "    def live(self, senses):",
-    "        while True:",
-    "            drive = self.homeostasis(senses)",
-    "            act = self.instinct(drive)",
-    "            self.sprite.play(act)",
+    "@dataclass",
+    "class Drives:",
+    "    energy: float = 0.75",
+    "    boredom: float = 0.25",
+    "    mood: float = 0.65",
+    "    attachment: float = 0.40",
     "",
-    "def homeostatic_drive(machine_state):",
-    "    energy -= 0.03 * hours",
-    "    boredom += 0.55 * idle_hours",
-    "    mood = ema(mood, target, tau)",
-    "    return dict(energy, boredom, mood)",
+    "class Senses:",
+    "    def sample(self):",
+    "        idle = get_last_input_seconds()",
+    "        cpu = read_cpu_percent() / 100",
+    "        return dict(idle=idle, cpu=cpu, hour=local_hour())",
     "",
-    "# the desk pet watches the user work...",
-    "# typing fast makes it work too",
+    "def homeostasis(drives, obs, dt):",
+    "    hours = dt / 3600",
+    "    drives.energy -= 0.03 * hours",
+    "    drives.boredom += 0.55 * hours if obs[\'idle\'] > 120 else 0",
+    "    target = 0.5 + 0.2 * (drives.energy - 0.5)",
+    "    drives.mood += (target - drives.mood) * min(1, dt / 900)",
+    "    return drives",
+    "",
+    "def instinct(drives):",
+    "    scores = {}",
+    "    scores[\'rest\'] = 2.4 * max(0, 0.62 - drives.energy) ** 1.5",
+    "    scores[\'walk\'] = 1.7 * drives.boredom * drives.energy",
+    "    scores[\'watch\'] = 1.3 * drives.attachment",
+    "    return max(scores, key=scores.get)",
+    "",
+    "def live(senses, sprite):",
+    "    drives = Drives()",
+    "    last = time.time()",
+    "    while True:",
+    "        now = time.time()",
+    "        obs = senses.sample()",
+    "        homeostasis(drives, obs, now - last)",
+    "        act = instinct(drives)",
+    "        sprite.play(act)",
+    "        last = now",
+    "        time.sleep(0.25)",
+    "",
+    "if __name__ == \'__main__\':",
+    "    live(Senses(), sprite=PETDEX_SPRITE)",
+    "",
+    "# the strange part: it is not animated, it is alive",
+    "# every state above is earned by what THIS machine is doing",
 ]
 
 
@@ -80,6 +109,71 @@ def burn(stop_flag) -> None:  # runs in child processes
         for _ in range(20000):
             x = x * 1.000001 + 0.000001
         x = 1.0001
+
+
+_FONT_CACHE: dict = {}
+
+
+def _font(size: int):
+    from PIL import ImageFont
+    if size not in _FONT_CACHE:
+        f = None
+        for name in ("segoeui.ttf", "arial.ttf"):
+            try:
+                f = ImageFont.truetype(name, size)
+                break
+            except OSError:
+                continue
+        _FONT_CACHE[size] = f or ImageFont.load_default()
+    return _FONT_CACHE[size]
+
+
+def _draw_cursor_and_overlays(rgb: np.ndarray) -> np.ndarray:
+    """mss does not capture the mouse cursor, so we draw it ourselves.
+    Also paints a live CPU meter so the 'stress' phase has visual proof."""
+    from PIL import Image, ImageDraw
+    import ctypes, ctypes.wintypes
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=None) / 100.0
+    except Exception:
+        cpu = 0.0
+
+    img = Image.fromarray(rgb)
+    draw = ImageDraw.Draw(img, "RGBA")
+
+    # --- CPU meter (top-right) ---
+    x0, y0, w, h = img.width - 320, 24, 296, 54
+    draw.rounded_rectangle([x0, y0, x0 + w, y0 + h], radius=10,
+                           fill=(12, 12, 22, 180))
+    pct = max(0.0, min(1.0, cpu))
+    bar_w = int((w - 16) * pct)
+    color = (90, 200, 120) if pct < 0.6 else ((240, 190, 60) if pct < 0.85
+                                              else (235, 80, 80))
+    draw.rounded_rectangle([x0 + 8, y0 + h - 20, x0 + 8 + bar_w, y0 + h - 8],
+                           radius=6, fill=color)
+    draw.text((x0 + 10, y0 + 6), f"CPU {int(pct * 100)}%",
+              font=_font(20), fill=(235, 235, 245))
+
+    # --- cursor ---
+    user32 = ctypes.windll.user32
+    pt = ctypes.wintypes.POINT()
+    if user32.GetCursorPos(ctypes.byref(pt)):
+        cx, cy = pt.x // 2, pt.y // 2      # physical -> 1080p half scale
+        down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+        if down:
+            draw.ellipse([cx - 26, cy - 26, cx + 26, cy + 26],
+                         outline=(255, 210, 90, 220), width=5)
+        pts = [(cx, cy), (cx + 4, cy + 26), (cx + 11, cy + 18),
+               (cx + 20, cy + 30), (cx + 27, cy + 25), (cx + 18, cy + 14),
+               (cx + 28, cy + 11)]
+        draw.polygon([(px, py) for px, py in pts],
+                     fill=(255, 255, 255, 235))
+        draw.line([(cx, cy), (cx + 4, cy + 26), (cx + 11, cy + 18),
+                   (cx + 20, cy + 30), (cx + 27, cy + 25), (cx + 18, cy + 14),
+                   (cx + 28, cy + 11), (cx, cy)],
+                  fill=(20, 20, 20, 255), width=2)
+    return np.asarray(img)
 
 
 def record_loop(stop_event: threading.Event) -> None:
@@ -92,16 +186,15 @@ def record_loop(stop_event: threading.Event) -> None:
             interval = 1.0 / FPS
             start = time.time()
             written = 0
-            last_rgb = None
             while not stop_event.is_set():
                 frame = np.asarray(sct.grab(mon))          # BGRA
                 frame = cv2.resize(frame, (OUT_W, OUT_H),
                                    interpolation=cv2.INTER_AREA)
-                last_rgb = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
-                # keep video time == real time: pad if we fell behind
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+                rgb = _draw_cursor_and_overlays(rgb)
                 due = int((time.time() - start) * FPS) + 1
                 while written < due:
-                    writer.append_data(last_rgb)
+                    writer.append_data(rgb)
                     written += 1
                 sleep = (start + written * interval) - time.time()
                 if sleep > 0:
@@ -130,17 +223,19 @@ def force_english_input() -> None:
     user32.EnumWindows(cb, 0)
 
 
+_TYPE_POS = {"i": 0}
+
+
 def type_code(seconds: float) -> None:
-    """Type real keystrokes (only ASCII) with human-ish rhythm."""
+    """Type real keystrokes (only ASCII) with human-ish rhythm. The cursor
+    continues where the previous call stopped, so no line repeats in a row."""
     end = time.time() + seconds
-    lines = list(CODE_LINES)
     while time.time() < end:
-        for line in lines:
-            if time.time() >= end:
-                return
-            pyautogui.typewrite(line, interval=0.035)
-            pyautogui.press("enter")
-            time.sleep(0.35)
+        line = CODE_LINES[_TYPE_POS["i"] % len(CODE_LINES)]
+        _TYPE_POS["i"] += 1
+        pyautogui.typewrite(line, interval=0.035)
+        pyautogui.press("enter")
+        time.sleep(0.35)
 
 
 def main() -> None:
