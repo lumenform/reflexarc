@@ -17,11 +17,11 @@ RAW = ROOT / "docs" / "demo_real_raw.mp4"
 OUT_MP4 = ROOT / "docs" / "demo_real.mp4"
 OUT_GIF = ROOT / "docs" / "demo_real.gif"
 
-SPEEDUP_START, SPEEDUP_END, SPEED = 46.0, 134.0, 3
+SPEEDUP_START, SPEEDUP_END, SPEED = 46.0, 134.0, 2
 
 CAPTIONS = [
     (0.0, 46.0, "我打字的时候，它陪着一起忙"),
-    (46.0, 134.0, "我把 CPU 压满…它比我先慌（×3 倍速）"),
+    (46.0, 134.0, "我把 CPU 压满…它比我先慌（×2 倍速）"),
     (134.0, 999.0, "摸一摸"),
 ]
 

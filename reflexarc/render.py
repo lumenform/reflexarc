@@ -32,7 +32,7 @@ ROW_FPS = {
     "running-left": 10.0,
     "waving": 8.0,
     "jumping": 12.0,
-    "failed": 5.0,
+    "failed": 3.2,   # a dizzy faint should look heavy, not twitchy
     "waiting": 6.0,
     "running": 10.0,
     "review": 5.0,
