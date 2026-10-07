@@ -61,11 +61,19 @@ together are what make this one feel alive:
    keeps working: it only takes the cursor while you *rest on the pet*, and is
    click-through everywhere else.
 5. **It shows feelings.** A sleepy pet drifts `Zzz`; being petted floats
-   hearts; a melting CPU makes it sweat first, shiver, then faint.
-6. **It fidgets.** During quiet stretches it glances around, takes a deep
+   hearts; a melting CPU makes it sweat first, shiver, then faint - and the
+   emotion lives in the *body*, not only overhead: joy bounces, a hard fall
+   curls it into a ball that trembles, boredom sways.  There are also four
+   soft otter sounds (a happy chirp when petted, a startled squeak when
+   grabbed, a sad whimper after a bad landing); on by default, very quiet,
+   `REFLEXARC_SOUND=0` silences them.
+6. **You can read it.** **Double-click** and a tiny status bubble pops above
+   its head - `♥` wants a pet, `Z` sleepy, `…` bored, `💧` stressed,
+   `⌣` content.  No guessing what it is in the mood for.
+7. **It fidgets.** During quiet stretches it glances around, takes a deep
    breath, stretches, or hops a little - how often depends on its personality:
    a lazy pet sits still, a curious one keeps looking around.
-7. **It remembers being handled.** Grabs, drops and pettings are counted, and
+8. **It remembers being handled.** Grabs, drops and pettings are counted, and
    a hard drop genuinely raises stress and sours the mood.
 
 ## Assembled from
@@ -157,9 +165,11 @@ python run.py --no-laya           # or keep it off
 ```
 
 How to play: **move the cursor near it** and it follows with its eyes; **hover on
-the pet** and it gets slowly stroked (hearts); **click** for a quick pet; **press
-and drag** to pick it up (let go and it falls - a gentle set-down and a hard drop
-get different reactions); **tray menu** to pause or quit.
+the pet** and it gets slowly stroked (hearts); **click** for a quick pet;
+**double-click** to ask what it wants right now (a status bubble pops up);
+**press and drag** to pick it up (let go and it falls - a gentle set-down and a
+hard drop get different reactions, and a bad landing earns dizzy stars);
+**tray icon** to pause or quit.
 
 On first run the pet is fetched from the petdex manifest (`--pet-slug boba` by
 default; any of the 4,800+ slugs works). Model weights for the intuition layer are
@@ -176,6 +186,7 @@ python run.py [--headless] [--duration N] [--fresh] [--seed N]
 | Env var | Effect |
 | --- | --- |
 | `REFLEXARC_NO_GRAB=1` | disable picking the pet up (fully click-through again; hover/click petting stays) |
+| `REFLEXARC_SOUND=0` | silence the pet (sounds are on by default, very quiet) |
 | `REFLEXARC_BREATH=0` | disable the breathing pulse |
 | `REFLEXARC_EMOTES=0` | disable emote glyphs (Zzz / hearts / sweat) |
 | `REFLEXARC_DEBUG_HUD=1` | print per-frame cost every 2 s and run the hit-test self-check |
@@ -201,10 +212,12 @@ look the wrong way, and the probe catches it before you do.
 - [x] v0.2 - life signs: 16-direction gaze, breathing, shadow, emote glyphs,
       physics (walk with momentum, hops, landing squash), grab-and-throw
       interaction, personality-scaled liveliness
+- [x] v0.3 - readable: double-click status bubble, emotion body language
+      (bounce / curl / sway), exaggerated landing handfeel with dizzy stars,
+      more visible fidgets, soft otter sounds
 - [ ] shareable personality report card ("it became a night owl in 7 days")
 - [ ] multi-pet: two pets, two machines, one shared desktop
 - [ ] agent hooks: react when your coding agent finishes or fails
-- [ ] sound (subtle, off by default)
 
 ## Credits
 

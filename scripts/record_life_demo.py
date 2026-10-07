@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import ctypes.wintypes
+import json
 import subprocess
 import sys
 import threading
@@ -78,6 +79,14 @@ class Timeline:
 
 
 class Recorder(threading.Thread):
+    """Screen capture that also logs the cursor position per frame.
+
+    mss cannot see the cursor, and without a visible pointer the whole
+    interaction reads as a self-playing animation (confirmed by a Doubao
+    review of the first cut).  So we record where the cursor was for every
+    frame and paint a cursor into the clip during finalize.
+    """
+
     def __init__(self, region: tuple[int, int, int, int], out: Path) -> None:
         super().__init__(daemon=True)
         # h264/yuv420p wants even dimensions
@@ -86,6 +95,7 @@ class Recorder(threading.Thread):
         self.out = out
         self.stop_flag = threading.Event()
         self.frames = 0
+        self.cursor: list[tuple[int, int]] = []
         self.error: BaseException | None = None
 
     def run(self) -> None:
@@ -95,6 +105,7 @@ class Recorder(threading.Thread):
         left, top, right, bottom = self.region
         mon = {"left": left, "top": top, "width": right - left,
                "height": bottom - top}
+        pt = ctypes.wintypes.POINT()
         writer = None
         try:
             writer = imageio.get_writer(
@@ -107,6 +118,8 @@ class Recorder(threading.Thread):
                     wait = due - time.time()
                     if wait > 0:
                         time.sleep(wait)
+                    user32.GetCursorPos(ctypes.byref(pt))
+                    self.cursor.append((pt.x - left, pt.y - top))
                     raw = np.asarray(sct.grab(mon))          # BGRA
                     writer.append_data(raw[:, :, :3][:, :, ::-1])
                     self.frames += 1
@@ -118,57 +131,78 @@ class Recorder(threading.Thread):
 
 
 # --------------------------------------------------------------------------
-def run_timeline(body_x: int, body_y: int, tl: Timeline) -> None:
-    """The choreography.  Times are seconds from the recording start."""
-    up_left = (body_x - 620, body_y - 460)
-    up_right = (body_x + 430, body_y - 420)
-    down_left = (body_x - 520, body_y + 300)
+def run_timeline(body_x: int, body_y: int, region: tuple[int, int, int, int],
+                 tl: Timeline) -> None:
+    """The choreography.  Times are seconds from the recording start.
+
+    Cursor travels are kept inside the (tight) capture region so the pet
+    stays large in frame throughout.
+    """
+    left, top, right, bottom = region
+    up_left = (left + int((right - left) * 0.22), top + int((bottom - top) * 0.16))
+    up_right = (left + int((right - left) * 0.86), top + int((bottom - top) * 0.22))
+    down_left = (left + int((right - left) * 0.14), bottom - 60)
     on_body = (body_x, body_y)
 
-    # 0-4.5: the pet just lives (breathing, blinking, gaze wander)
-    tl.at(4.5)
+    # 0-4: the pet just lives (breathing, blinking, gaze wander)
+    tl.at(4.0)
 
-    # 4.5-10: gaze follows the cursor around
+    # 4-9: gaze follows the cursor around
     move_cursor(*down_left, duration=0.8)
-    tl.at(6.3)
+    tl.at(5.7)
     move_cursor(*up_left, duration=0.8)
-    tl.at(8.0)
+    tl.at(7.4)
     move_cursor(*up_right, duration=1.0)
-    tl.at(10.0)
+    tl.at(9.4)
 
-    # 10-13.5: hover on the pet -> slow stroking, hearts
+    # 9-12.5: hover on the pet -> slow stroking, hearts
     move_cursor(*on_body, duration=0.7)
-    tl.at(13.6)
+    tl.at(12.6)
 
-    # 13.6-14.6: a quick click = a pet-pet
+    # 12.6-13.6: a quick click = a pet-pet
     user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     time.sleep(0.09)
     user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-    tl.at(15.4)
+    tl.at(14.4)
 
-    # 15.4: press and pick it up
+    # 14.4: press and pick it up
     user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     time.sleep(0.25)
-    tl.at(16.2)
-    move_cursor(body_x - 180, body_y - 330, duration=1.2)
-    tl.at(18.4)
-    move_cursor(body_x - 420, body_y - 430, duration=1.1)
-    tl.at(21.6)
+    tl.at(15.2)
+    move_cursor(body_x - 260, body_y - 380, duration=1.2)
+    tl.at(17.4)
+    move_cursor(body_x - 430, body_y - 560, duration=1.0)
+    tl.at(20.4)
 
-    # 21.6: let go -> it falls
+    # 20.4: let go -> it falls
     user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-    tl.at(23.6)
+    tl.at(22.4)
 
-    # 23.6-27: it lands, squashes, maybe faints; we clean up the cursor
-    move_cursor(body_x + 300, body_y - 200, duration=1.0)
-    tl.at(28.0)
+    # 22.4-26: it lands, squashes, maybe faints; we clean up the cursor
+    move_cursor(right - 80, top + 90, duration=1.0)
+    tl.at(27.0)
 
-    # 28-33: back to idle; gaze settles and wanders
-    move_cursor(body_x + 520, body_y + 260, duration=1.2)
-    tl.at(33.5)
+    # 27-32: back to idle; gaze settles and wanders
+    move_cursor(left + 80, bottom - 90, duration=1.2)
+    tl.at(32.5)
 
     # the record runs until this point
-    tl.at(34.5)
+    tl.at(33.5)
+
+
+def _minimize_all() -> None:
+    """Clear the desktop behind the pet (restored via _restore_all)."""
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "(New-Object -ComObject Shell.Application).MinimizeAll()"],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _restore_all() -> None:
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "(New-Object -ComObject Shell.Application).UndoMinimizeAll()"],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def main() -> int:
@@ -184,9 +218,13 @@ def main() -> int:
     body_y = top + int(h * 0.42)
     print(f"pet window {left},{top} - {right},{bottom}  body at {body_x},{body_y}")
 
-    # capture region: room to be carried up-left, and to land
-    region = (max(0, body_x - 660), max(0, body_y - 560),
-              min(3840, body_x + 420), min(2160, body_y + 400))
+    # tight framing: the pet fills about half the frame (a Doubao review of
+    # the wide cut asked for the pet to be >= 1/3 of the frame)
+    REG_W, REG_H = 800, 1000
+    region = (max(0, body_x - int(REG_W * 0.75)),
+              max(0, body_y - int(REG_H * 0.75)),
+              min(3840, body_x + int(REG_W * 0.25)),
+              min(2160, body_y + int(REG_H * 0.25)))
     print(f"capture region {region}  "
           f"({region[2]-region[0]}x{region[3]-region[1]})")
 
@@ -195,30 +233,62 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     rec = Recorder(region, out)
+    _minimize_all()                 # clean desktop behind the pet
+    time.sleep(0.6)
+    hwnd = user32.FindWindowW(None, "ReflexArc")
+    if not (hwnd and user32.IsWindowVisible(hwnd)):
+        print("pet window vanished after MinimizeAll - aborting", file=sys.stderr)
+        _restore_all()
+        return 3
     rec.start()
     time.sleep(0.4)                 # let the writer settle
 
     tl = Timeline()
     try:
-        run_timeline(body_x, body_y, tl)
+        run_timeline(body_x, body_y, rec.region, tl)
     finally:
         rec.stop_flag.set()
         rec.join(timeout=5)
         user32.SetCursorPos(*orig)
+        _restore_all()
 
     if rec.error is not None:
         print(f"recording failed: {rec.error!r}", file=sys.stderr)
         return 2
+    # keep the cursor track next to the clip so finalize can paint it in
+    cursor_file = out.with_suffix(".cursor.json")
+    cursor_file.write_text(json.dumps(rec.cursor), encoding="utf-8")
     dur = rec.frames / FPS
     print(f"recorded {rec.frames} frames ({dur:.1f}s) -> {out}")
+    print(f"cursor track ({len(rec.cursor)} points) -> {cursor_file}")
 
     if args.finalize:
         finalize(out)
     return 0
 
 
+def _bake_cursor(height: int = 32):
+    """A classic arrow pointer with a soft drop shadow.
+
+    mss captures no cursor, so without this the clip reads as a self-playing
+    animation; pasting a pointer is what turns it into an interaction demo.
+    """
+    from PIL import Image, ImageDraw
+    w = int(height * 0.66)
+    im = Image.new("RGBA", (w + 10, height + 10), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    pts = [(3, 3), (3, height * 0.74), (w * 0.32, height * 0.58),
+           (w * 0.50, height * 0.97), (w * 0.66, height * 0.90),
+           (w * 0.48, height * 0.52), (w * 0.95, height * 0.52)]
+    d.polygon([(x + 3, y + 3) for x, y in pts], fill=(0, 0, 0, 70))
+    d.polygon(pts, fill=(252, 252, 252, 255),
+              outline=(20, 20, 20, 255), width=3)
+    return im
+
+
 def finalize(raw: Path) -> None:
-    """Compress to the README mp4 and a small looping gif.
+    """Compress to the README mp4 and a small looping gif, painting in the
+    cursor track recorded alongside the clip.
 
     Streams the raw clip frame by frame; h264 needs even dimensions, which
     is easy to get wrong when scaling, so both outputs round to even.
@@ -230,15 +300,26 @@ def finalize(raw: Path) -> None:
     mp4 = raw.parent / "demo_life.mp4"
     gif = raw.parent / "demo_life.gif"
 
+    # cursor track recorded by Recorder (frame -> region-relative position)
+    track: list = []
+    cursor_file = raw.with_suffix(".cursor.json")
+    if cursor_file.exists():
+        try:
+            track = json.loads(cursor_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            track = []
+    cursor_pm = _bake_cursor(46) if track else None
+
     reader = imageio.get_reader(str(raw))
     meta = reader.get_meta_data()
     fps = float(meta.get("fps", FPS))
-    w, h = meta.get("size", (1080, 950))
+    w, h = meta.get("size", (800, 1000))
 
-    mp4_w = 720
+    mp4_w = 640
     mp4_h = max(2, int(h * mp4_w / w) // 2 * 2)
-    gif_w = 540
+    gif_w = 480
     gif_h = max(2, int(mp4_h * gif_w / mp4_w) // 2 * 2)
+    sx, sy = mp4_w / max(1, w), mp4_h / max(1, h)
 
     writer = imageio.get_writer(str(mp4), fps=fps, codec="libx264",
                                 quality=7, macro_block_size=1,
@@ -247,6 +328,13 @@ def finalize(raw: Path) -> None:
     n = 0
     for i, frame in enumerate(reader):
         small = cv2.resize(frame, (mp4_w, mp4_h), interpolation=cv2.INTER_AREA)
+        if cursor_pm is not None and i < len(track):
+            px, py = track[i]
+            im = Image.fromarray(small)
+            # the arrow tip sits at (3, 3) inside the baked image: offset so
+            # the tip - not the image corner - lands on the cursor position
+            im.paste(cursor_pm, (int(px * sx) - 3, int(py * sy) - 3), cursor_pm)
+            small = np.asarray(im)
         writer.append_data(small)
         if i % 2 == 0:                       # gif runs at half rate
             tiny = cv2.resize(small, (gif_w, gif_h),
