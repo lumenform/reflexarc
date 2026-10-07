@@ -62,6 +62,8 @@ class Stats:
     night_active_samples: int = 0
     pets_received: int = 0
     first_seen: float = 0.0
+    times_grabbed: int = 0     # picked up by the cursor
+    hover_pets: int = 0        # ticks the cursor rested on the pet
 
     def to_dict(self) -> dict:
         return asdict(self)

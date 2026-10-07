@@ -49,6 +49,7 @@ class Simulation:
         self._t_save = 0.0
         self._last_decision: Decision | None = None
         self._last_decision_ts = 0.0
+        self._held_t = 0.0
 
     # ------------------------------------------------------------------
     def step(self, obs: Observation, now: float | None = None) -> Decision | None:
@@ -105,6 +106,52 @@ class Simulation:
         was_resting = self.brain.current is Intent.REST
         reaction = Intent.SEEK_ATTENTION if was_resting else Intent.CHEER
         self.brain.interrupt(reaction, 1.8)
+
+    # ---- physical interactions (all callable headless) ----------------
+    def on_hover_tick(self) -> None:
+        """The cursor has rested on the pet for a while: a gentle stroke."""
+        self.stats.hover_pets += 1
+        d = self.drives
+        d.mood = min(1.0, d.mood + 0.04)
+        d.social_hunger = max(0.0, d.social_hunger - 0.10)
+
+    def on_pick_up(self) -> None:
+        """Grabbed by the cursor."""
+        from .brain import Intent
+        d = self.drives
+        d.stress = min(1.0, d.stress + 0.05)
+        self.stats.times_grabbed += 1
+        self._held_t = 0.0
+        self.brain.interrupt(Intent.SEEK_ATTENTION, 1.2)
+
+    def on_hold(self, dt: float) -> None:
+        """Carried: soothing at first, unsettling if it drags on."""
+        d = self.drives
+        self._held_t += dt
+        if self._held_t < 2.5:
+            d.mood = min(1.0, d.mood + 0.02 * dt)
+            d.social_hunger = max(0.0, d.social_hunger - 0.06 * dt)
+        else:
+            d.stress = min(1.0, d.stress + 0.05 * dt)
+
+    def on_drop(self) -> None:
+        """Released into the air; the landing event will speak."""
+
+    def on_land(self, impact: float) -> float:
+        """Touched down. Returns the interrupt duration used (0 = none), so
+        the renderer can keep its own transitions in sync."""
+        from .brain import Intent
+        d = self.drives
+        if impact >= 0.55:
+            # a real drop: shaken up for a while
+            d.stress = min(1.0, d.stress + 0.12)
+            d.mood = max(0.0, d.mood - 0.05)
+            self.brain.interrupt(Intent.OVERWHELMED, 1.4)
+            return 1.4
+        if impact >= 0.25:
+            # a hop landing: content, no drama
+            d.mood = min(1.0, d.mood + 0.015)
+        return 0.0
 
     # ------------------------------------------------------------------
     def _behaviour_feedback(self, decision: Decision) -> None:

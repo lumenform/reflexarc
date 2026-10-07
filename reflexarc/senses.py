@@ -7,6 +7,7 @@ sent anywhere.
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -87,6 +88,28 @@ def get_battery() -> tuple[float | None, bool | None]:
         return None, None
 
 
+def get_foreground_rect() -> tuple[float, float, float, float] | None:
+    """Foreground window rectangle (l, t, r, b) in *physical* virtual-desktop
+    pixels, or None. Qt-side users convert to logical coords (DPI ratio); the
+    raw title is still never read or stored here."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        rect = ctypes.wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        if rect.right <= rect.left or rect.bottom <= rect.top:
+            return None
+        return (float(rect.left), float(rect.top),
+                float(rect.right), float(rect.bottom))
+    except OSError:
+        return None
+
+
 CPU = object  # placeholder type alias, kept simple
 
 
@@ -100,6 +123,7 @@ class Observation:
     battery: float | None
     on_battery: bool | None
     window_category: str
+    fg_rect: tuple[float, float, float, float] | None = None  # physical px
 
 
 class Senses:
@@ -134,4 +158,5 @@ class Senses:
             battery=battery,
             on_battery=on_battery,
             window_category=get_foreground_category(),
+            fg_rect=get_foreground_rect(),
         )

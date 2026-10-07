@@ -46,17 +46,21 @@ PETDEX_ROW = {
     Intent.PONDER: "review",
 }
 
-# (min_duration_s, max_duration_s, cooldown_s)
+# (min_duration_s, max_duration_s, cooldown_s).  These are the *base* dwell
+# times; the personality scales them in Brain._duration - a lazy pet lingers
+# in rest, a curious one moves on sooner.  Long rest stretches are fine now:
+# breathing, gaze wander and fidgets keep the pet alive while it "does
+# nothing".
 TIMING = {
-    Intent.REST: (25, 90, 5),
-    Intent.WALK_LEFT: (3, 9, 2),
-    Intent.WALK_RIGHT: (3, 9, 2),
-    Intent.WATCH_USER: (8, 20, 3),
-    Intent.MIRROR_WORK: (5, 15, 3),
-    Intent.CHEER: (1.6, 2.8, 8),
+    Intent.REST: (12, 36, 5),
+    Intent.WALK_LEFT: (2.5, 7.5, 2),
+    Intent.WALK_RIGHT: (2.5, 7.5, 2),
+    Intent.WATCH_USER: (7, 16, 3),
+    Intent.MIRROR_WORK: (5, 14, 3),
+    Intent.CHEER: (1.6, 2.8, 6),
     Intent.SEEK_ATTENTION: (4, 9, 12),
     Intent.OVERWHELMED: (3, 6, 10),
-    Intent.PONDER: (6, 14, 5),
+    Intent.PONDER: (5, 12, 5),
 }
 
 
@@ -227,12 +231,27 @@ class Brain:
             self._streak = 0
 
         lo, hi, cd = TIMING[best]
-        duration = self.rng.uniform(lo, hi)
+        duration = self._duration(best, lo, hi)
         reason = self._reason(best, obs, drives)
         self.current = best
         self.time_left = duration
         self._cooldowns[best] = cd
         return Decision(intent=best, duration=duration, reason=reason, scores=scores)
+
+    def _duration(self, intent: Intent, lo: float, hi: float) -> float:
+        """Personality scales how long a behaviour is held: lazy pets linger
+        in calm states and cut excursions short; curious ones do the
+        opposite.  There is no fixed activity mood - the pet's own traits
+        decide how busy it looks."""
+        p = self.persona
+        if intent in (Intent.REST, Intent.PONDER, Intent.WATCH_USER):
+            scale = 0.75 + 0.85 * p.laziness          # 0.75 .. 1.60
+        elif intent in (Intent.WALK_LEFT, Intent.WALK_RIGHT, Intent.MIRROR_WORK):
+            scale = 1.25 - 0.55 * p.laziness          # 0.70 .. 1.25
+        else:
+            scale = 1.0
+        d = self.rng.uniform(lo, hi) * scale
+        return max(lo * 0.6, min(d, hi * 1.6))
 
     def _reason(self, i: Intent, obs: Observation, d: Drives) -> str:
         if i is Intent.REST:
