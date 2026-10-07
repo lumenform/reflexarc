@@ -36,15 +36,17 @@ ROWS = [
 ]
 
 ROW_FPS = {
-    "idle": 6.0,
-    "running-right": 10.0,
-    "running-left": 10.0,
-    "waving": 8.0,
-    "jumping": 12.0,
+    # deliberately unhurried: fast row playback reads as flicker at this
+    # size, especially the jumping row which plays while the pet is carried
+    "idle": 5.0,
+    "running-right": 8.0,
+    "running-left": 8.0,
+    "waving": 6.5,
+    "jumping": 7.5,
     "failed": 3.2,   # a dizzy faint should look heavy, not twitchy
-    "waiting": 6.0,
-    "running": 10.0,
-    "review": 5.0,
+    "waiting": 5.0,
+    "running": 8.0,
+    "review": 4.5,
 }
 
 FRAMES_PER_ROW = 8

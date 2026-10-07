@@ -14,13 +14,13 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QIcon, QPainter
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 from . import desktop
 from .effects import (Breath, EmoteDirector, EmotionBody, FidgetScheduler,
                       ShadowRenderer, StatusBubble)
-from .gaze import GazeController, GazeInputs
+from .gaze import ATLAS_STRIDE, STEPS, GazeController, GazeInputs
 from .motion import MotionController, MotionRequest
 from .senses import Senses
 from .sim import Simulation
@@ -50,6 +50,7 @@ FIDGET_ROWS = {"idle", "waiting", "review"}
 PAD_X, PAD_TOP, PAD_BOT = 16, 100, 110
 
 BLINK_DURATION = 0.12
+CROSSFADE_T = 0.11      # rows cross-fade instead of hard-cutting
 
 
 class PetWindow(QWidget):
@@ -150,9 +151,15 @@ class PetWindow(QWidget):
         self.gaze = GazeController(seed=self._rng.randrange(1 << 30))
         self._gaze_active = False
         self._gaze_idx = 0
+        self._switch_times: list[float] = []   # gaze step changes (debug HUD)
         self._blink_until = 0.0
         self._blink_next = time.time() + self._blink_gap()
         self._dpr = self._device_ratio()
+
+        # row cross-fade: (pixmap, dx, dy) of the outgoing row, and how far
+        # the fade has progressed (CROSSFADE_T = done)
+        self._prev_draw: tuple | None = None
+        self._cross_t = CROSSFADE_T
 
         # --- physics body (feet are the anchor; the window follows the feet) ---
         self.motion = MotionController(
@@ -266,6 +273,30 @@ class PetWindow(QWidget):
                 and self.y() <= gy < self.y() + self.height())
 
     # ------------------------------------------------------------------
+    def _draw_hud(self, painter: QPainter, now: float) -> None:
+        """Debug overlay: what the pet is doing and how often it changes.
+
+        The useful number is gaze switches per second - a reviewer's
+        tooling measured 5 scene changes per second in an earlier cut,
+        which is what 'flickering' looks like as a metric.
+        """
+        painter.setPen(QColor(255, 90, 80, 235))
+        font = QFont("Consolas", 8)
+        painter.setFont(font)
+        recent = sum(1 for t in self._switch_times if now - t < 10.0)
+        pose = self._pose
+        lines = [
+            f"row {self._row}   gaze {self._gaze_idx}/{STEPS}",
+            f"gaze switches: {recent}/10s  ({recent / 10.0:.1f}/s)",
+            (f"mode {pose.mode}  h={pose.h:.0f}  sy={pose.sy:.2f}"
+             if pose else ""),
+        ]
+        y = 14
+        for s in lines:
+            if s:
+                painter.drawText(6, y, s)
+            y += 12
+
     def _measure(self, t0: float, tag: str) -> None:
         """--debug HUD: rolling per-frame cost, printed every 2 s."""
         ms = (time.perf_counter() - t0) * 1000.0
@@ -275,8 +306,10 @@ class PetWindow(QWidget):
         now = time.time()
         if now >= self._ms_next:
             self._ms_next = now + 2.0
+            recent = sum(1 for t in self._switch_times if now - t < 10.0)
             print(f"[reflexarc] tick {getattr(self, '_ms_tick', 0.0):.2f} ms  "
-                  f"paint {getattr(self, '_ms_paint', 0.0):.2f} ms",
+                  f"paint {getattr(self, '_ms_paint', 0.0):.2f} ms  "
+                  f"gaze-switches {recent}/10s ({recent / 10.0:.1f}/s)",
                   file=sys.stderr, flush=True)
 
     def _tick(self) -> None:
@@ -311,14 +344,23 @@ class PetWindow(QWidget):
             inp = GazeInputs(
                 cursor=(self._cursor.x, self._cursor.y),
                 cursor_fresh=obs.idle_seconds < 3.0,
+                # lock on only after the cursor settles; a moving cursor
+                # would mean re-drawing the head every step (the flicker a
+                # scene-change count flagged: 5 jumps per second)
+                cursor_settled=0.35 <= obs.idle_seconds < 4.0,
                 fg_rect=self._logical_rect(obs.fg_rect),
                 held=held,
                 drowsy=self._drowsiness(snap),
                 sleepy=self._sleeping(snap),
                 cursor_radius=520.0 * self.scale,
             )
+            prev_idx = self._gaze_idx
             self._gaze_idx = self.gaze.update(dt, self._eye_global(), inp)
             self._gaze_active = True
+            if self._gaze_idx != prev_idx:
+                self._switch_times.append(now)
+                if len(self._switch_times) > 200:
+                    del self._switch_times[:100]
             if now >= self._blink_next:
                 self._blink_until = now + BLINK_DURATION
                 self._blink_next = now + self._blink_gap()
@@ -365,8 +407,15 @@ class PetWindow(QWidget):
             final_row = "jumping"       # legs out: a leaping, dangling pose
             self._gaze_active = False
         if final_row != self._row:
+            # capture the outgoing picture so the two rows can cross-fade
+            self._prev_draw = self._current_sprite(now)
+            self._cross_t = 0.0
             self._row = final_row
             self._frame_idx = 0.0
+        elif self._cross_t < CROSSFADE_T:
+            self._cross_t = min(CROSSFADE_T, self._cross_t + dt)
+            if self._cross_t >= CROSSFADE_T:
+                self._prev_draw = None
         fps = ROW_FPS.get(self._row, 6.0)
         self._frame_idx += dt * fps
 
@@ -413,8 +462,8 @@ class PetWindow(QWidget):
                 self.breath.boost = 1.8
             elif fid.kind == "stretch":
                 s = math.sin(math.pi * k)
-                self._extra_sx = 1.0 + 0.085 * s
-                self._extra_sy = 1.0 - 0.115 * s
+                self._extra_sx = 1.0 + 0.045 * s
+                self._extra_sy = 1.0 - 0.060 * s
             elif fid.kind == "hop" and fresh:
                 self._fidget_hop = True     # the body hops next physics step
         self._fid_handled = fid
@@ -436,13 +485,14 @@ class PetWindow(QWidget):
                 dt, energy=d.energy, mood=d.mood, stress=d.stress, cpu=obs.cpu,
                 sleeping=sleeping, head=self._head_local, foot=self._foot_local)
 
-        # startled little glances right after being picked up
+        # startled little glances right after being picked up - slow enough
+        # to read as worry, not as a twitch
         now = time.time()
         if now < self._panic_until:
             if now >= self._panic_next:
-                self._panic_next = now + 0.24
+                self._panic_next = now + 0.55
                 self._panic_sign = -self._panic_sign
-                self.gaze.nudge(6 * self._panic_sign, ttl=0.26)
+                self.gaze.nudge(2 * self._panic_sign, ttl=0.7)
 
         # body-language layer: the emotion shows in the pose itself
         self._em_sx, self._em_sy, self._em_y = self._body.update(dt)
@@ -602,23 +652,29 @@ class PetWindow(QWidget):
         # the window stays pre-armed, so the second click of a double-click
         # lands immediately instead of being swallowed by a fresh 0.18s wait
 
-    def paintEvent(self, event) -> None:  # noqa: N802
-        now = time.time()
-        t0 = time.perf_counter() if self._debug else 0.0
+    def _current_sprite(self, now: float | None = None):
+        """(pixmap, source dx, dy) for whatever should be on screen now."""
+        now = time.time() if now is None else now
         if self._gaze_active and self.sprites.blink_frames and now < self._blink_until:
             idx = self.sprites.blink_frames[0]
             pm = self.sprites.frame("idle", idx)
             dx, dy = self.sprites.draw_offset("idle", idx)
             bx, by = self.sprites.blink_align
-            dx += bx
-            dy += by
-        elif self._gaze_active:
-            pm = self.sprites.look(self._gaze_idx)
-            dx, dy = self.sprites.draw_offset("look", self._gaze_idx)
-        else:
-            idx = int(self._frame_idx)
-            pm = self.sprites.frame(self._row, idx)
-            dx, dy = self.sprites.draw_offset(self._row, idx)
+            return pm, dx + bx, dy + by
+        if self._gaze_active:
+            atlas_idx = self._gaze_idx * ATLAS_STRIDE
+            pm = self.sprites.look(atlas_idx)
+            dx, dy = self.sprites.draw_offset("look", atlas_idx)
+            return pm, dx, dy
+        idx = int(self._frame_idx)
+        pm = self.sprites.frame(self._row, idx)
+        dx, dy = self.sprites.draw_offset(self._row, idx)
+        return pm, dx, dy
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        now = time.time()
+        t0 = time.perf_counter() if self._debug else 0.0
+        pm, dx, dy = self._current_sprite(now)
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -643,9 +699,20 @@ class PetWindow(QWidget):
         painter.scale(self.breath.sx * self._extra_sx * pose_sx * self._em_sx,
                       self.breath.sy * self._extra_sy * pose_sy * self._em_sy)
         painter.translate(-fx, -fy)
+        # cross-fade from the outgoing row: a hard cut between animations
+        # reads as a flicker, a short blend reads as the pet *changing pose*
+        if self._prev_draw is not None and self._cross_t < CROSSFADE_T:
+            k = max(0.0, min(1.0, self._cross_t / CROSSFADE_T))
+            ppm, pdx, pdy = self._prev_draw
+            painter.setOpacity(1.0 - k)
+            painter.drawPixmap(int(PAD_X + pdx * self.scale),
+                               int(PAD_TOP + pdy * self.scale + self._em_y),
+                               self.sprite_w, self.sprite_h, ppm)
+            painter.setOpacity(k)
         painter.drawPixmap(int(PAD_X + dx * self.scale),
                            int(PAD_TOP + dy * self.scale + self._em_y),
                            self.sprite_w, self.sprite_h, pm)
+        painter.setOpacity(1.0)
 
         # glyphs live in window coordinates, above everything
         painter.resetTransform()
@@ -654,6 +721,7 @@ class PetWindow(QWidget):
             self._bubble.draw(painter, now, self._head_local[0],
                               self._head_local[1] - 92 * self.scale)
         if self._debug:
+            self._draw_hud(painter, now)
             self._measure(t0, "paint")
 
     # ------------------------------------------------------------------

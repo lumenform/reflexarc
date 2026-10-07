@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 
-from reflexarc.gaze import (GazeController, GazeInputs, angle_of,
+from reflexarc.gaze import (ATLAS_STRIDE, GazeController, GazeInputs, angle_of,
                             direction_index, nearest_point_on_rect)
 
 
@@ -29,21 +29,22 @@ def test_angle_wrap() -> None:
 
 
 def test_direction_mapping() -> None:
-    # must match tests/look_probe.py, which verifies the same convention
-    # against the actual atlas pixels
+    # playback quantises to 8 steps (45 deg each); each step maps to every
+    # second frame of the 16-direction atlas
     cases = [
         ((0, -100), 0),      # up (facing the viewer)
-        ((70, -70), 2),      # up-right
-        ((100, 0), 4),       # right
-        ((70, 70), 6),       # down-right
-        ((0, 100), 8),       # down (back to the viewer)
-        ((-70, 70), 10),     # down-left
-        ((-100, 0), 12),     # left
-        ((-70, -70), 14),    # up-left
+        ((100, -100), 1),    # up-right
+        ((100, 0), 2),       # right
+        ((100, 100), 3),     # down-right
+        ((0, 100), 4),       # down (back to the viewer)
+        ((-100, 100), 5),    # down-left
+        ((-100, 0), 6),      # left
+        ((-100, -100), 7),   # up-left
     ]
     for (dx, dy), want in cases:
         got = direction_index(dx, dy)
         check(got == want, f"direction_index({dx},{dy}) = {got}, want {want}")
+    check(ATLAS_STRIDE == 2, "each gaze step must map to every 2nd look frame")
     print("  direction mapping: 8 compass points OK")
 
 
@@ -59,15 +60,15 @@ def test_nearest_point() -> None:
 def test_turn_takes_time() -> None:
     g = GazeController(seed=1)
     inp = GazeInputs(cursor=(5000.0, 0.0), cursor_fresh=True,
-                     cursor_radius=10 ** 6)
+                     cursor_settled=True, cursor_radius=10 ** 6)
     frames = 0
-    for _ in range(120):
+    for _ in range(150):
         idx = g.update(1 / 30, (0.0, 0.0), inp)
         frames += 1
-        if idx == 4:
+        if idx == 2:            # 90 deg = step 2 of 8
             break
     check(frames >= 5, f"a 90-deg turn snapped in {frames} frames")
-    check(frames <= 30, f"a 90-deg turn took {frames} frames - too slow")
+    check(frames <= 75, f"a 90-deg turn took {frames} frames - too slow")
     print(f"  90-deg turn: {frames} frames (~{frames / 30:.2f}s) OK")
 
 
@@ -78,7 +79,8 @@ def test_hysteresis_no_twitch() -> None:
     eye = (0.0, 0.0)
     a = math.radians(22.5)
     target = (math.sin(a) * 200.0, -math.cos(a) * 200.0)   # exactly 22.5 deg
-    inp = GazeInputs(cursor=target, cursor_fresh=True, cursor_radius=10 ** 6)
+    inp = GazeInputs(cursor=target, cursor_fresh=True, cursor_settled=True,
+                     cursor_radius=10 ** 6)
     for _ in range(90):
         g.update(1 / 30, eye, inp)
     seen = set()
@@ -91,11 +93,11 @@ def test_hysteresis_no_twitch() -> None:
 def test_sleepy_pulls_down() -> None:
     g = GazeController(seed=1)
     inp = GazeInputs(cursor=(5000.0, 0.0), cursor_fresh=True,
-                     cursor_radius=10 ** 6, sleepy=True)
+                     cursor_settled=True, cursor_radius=10 ** 6, sleepy=True)
     idx = 0
-    for _ in range(90):
+    for _ in range(150):
         idx = g.update(1 / 30, (0.0, 0.0), inp)
-    check(idx == 8, f"a sleepy pet should settle looking down (8), got {idx}")
+    check(idx == 4, f"a sleepy pet should settle looking down (4), got {idx}")
     print(f"  sleepy gaze settles on d={idx} (head down) OK")
 
 
@@ -103,17 +105,17 @@ def test_hover_target_priority() -> None:
     g = GazeController(seed=1)
     # cursor nearby beats the window rect
     inp = GazeInputs(cursor=(0.0, -300.0), cursor_fresh=True,
-                     cursor_radius=520.0,
+                     cursor_settled=True, cursor_radius=520.0,
                      fg_rect=(-500.0, -500.0, 500.0, -400.0))
     idx = g.update(1 / 30, (0.0, 0.0), inp)
     check(idx == 0, "cursor right above should be d=0")
     # cursor too far: falls back to the window rect
     inp2 = GazeInputs(cursor=(0.0, -5000.0), cursor_fresh=True,
-                      cursor_radius=520.0,
+                      cursor_settled=True, cursor_radius=520.0,
                       fg_rect=(-500.0, -500.0, 500.0, -400.0))
-    for _ in range(120):
+    for _ in range(150):
         idx = g.update(1 / 30, (0.0, 0.0), inp2)
-    check(idx in (0, 15), f"far cursor should fall back to the rect (got {idx})")
+    check(idx in (0, 7), f"far cursor should fall back to the rect (got {idx})")
     print(f"  target priority: cursor > window rect OK (d={idx})")
 
 

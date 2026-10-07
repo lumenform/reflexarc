@@ -22,8 +22,13 @@ import math
 import random
 from dataclasses import dataclass
 
-DEG_PER_DIR = 22.5
-DIRECTIONS = 16
+# The atlas has 16 directions, but playback quantises to 8 (45 degrees per
+# step): every step is a full head redraw in this art style, so 16 steps read
+# as flicker while 8 read as a head turning (verified against a 99-jump-per-
+# 19s scene-change count from a reviewer's tooling).
+STEPS = 8
+DEG_PER_DIR = 360.0 / STEPS
+ATLAS_STRIDE = 2      # each gaze step = every second look frame
 
 
 def angle_of(dx: float, dy: float) -> float:
@@ -32,8 +37,8 @@ def angle_of(dx: float, dy: float) -> float:
 
 
 def direction_index(dx: float, dy: float) -> int:
-    """Screen-space delta -> petdex v2 look frame index (0..15)."""
-    return int(round(angle_of(dx, dy) / DEG_PER_DIR)) % DIRECTIONS
+    """Screen-space delta -> gaze step (0..7, 45 degrees each)."""
+    return int(round(angle_of(dx, dy) / DEG_PER_DIR)) % STEPS
 
 
 def _lerp_angle(a: float, b: float, k: float) -> float:
@@ -54,23 +59,25 @@ def nearest_point_on_rect(x: float, y: float,
 class GazeInputs:
     cursor: tuple[float, float] | None = None   # global screen coords
     cursor_fresh: bool = False     # user moved the mouse recently
+    cursor_settled: bool = False   # ...and it has been still for a moment
     fg_rect: tuple[float, float, float, float] | None = None
     held: bool = False             # being carried: watch the cursor
     drowsy: float = 0.0            # 0..1, pulls the gaze down
     sleepy: bool = False           # fully asleep: head down
     cursor_radius: float = 520.0   # notice the cursor within this distance
-    wander_gap: tuple[float, float] = (2.5, 7.0)
+    wander_gap: tuple[float, float] = (4.5, 10.0)   # unhurried gaze drift
 
 
 class GazeController:
-    def __init__(self, seed: int | None = None, max_deg_per_s: float = 520.0,
-                 step_hyst: float = 0.28, wander_steps: int = 3) -> None:
+    def __init__(self, seed: int | None = None, max_deg_per_s: float = 120.0,
+                 step_hyst: float = 0.30, wander_steps: int = 2) -> None:
         self.rng = random.Random(seed)
         self.max_deg_per_s = max_deg_per_s
         self.step_hyst = step_hyst
         self.wander_steps = wander_steps
 
         self._angle = 0.0        # continuous gaze angle (degrees)
+        self._rate = 0.0         # current turn rate (deg/s), eased
         self._idx = 0            # quantised frame index
         self._t = 0.0
         self._wander_target = 0.0
@@ -118,16 +125,29 @@ class GazeController:
         if inp.drowsy > 0.55:
             speed *= 0.45
         delta = ((target - self._angle + 180.0) % 360.0) - 180.0
-        step = max(-speed * dt, min(speed * dt, delta))
+        # ease the *start*: a living head accelerates out of stillness
+        # instead of snapping to a constant turn speed.  The approach to the
+        # target keeps full speed and snaps the last fraction - a
+        # proportional (exponential) approach would drag the final degrees
+        # out for seconds.
+        if abs(delta) < 0.5:
+            self._rate = 0.0
+            step = delta
+        else:
+            want = speed if delta > 0.0 else -speed
+            self._rate += (want - self._rate) * min(1.0, 7.0 * dt)
+            step = self._rate * dt
+            if abs(step) > abs(delta):
+                step = delta
         self._angle = (self._angle + step) % 360.0
 
         # quantise with hysteresis (0.5 + hyst past the step boundary)
         frac = self._angle / DEG_PER_DIR
-        diff = ((frac - self._idx + DIRECTIONS / 2.0) % DIRECTIONS) - DIRECTIONS / 2.0
+        diff = ((frac - self._idx + STEPS / 2.0) % STEPS) - STEPS / 2.0
         if diff >= 0.5 + self.step_hyst:
-            self._idx = (self._idx + 1) % DIRECTIONS
+            self._idx = (self._idx + 1) % STEPS
         elif diff <= -(0.5 + self.step_hyst):
-            self._idx = (self._idx - 1) % DIRECTIONS
+            self._idx = (self._idx - 1) % STEPS
         return self._idx
 
     # ------------------------------------------------------------------
@@ -136,7 +156,10 @@ class GazeController:
         ex, ey = eye
         if inp.held and inp.cursor is not None:
             return angle_of(inp.cursor[0] - ex, inp.cursor[1] - ey)
-        if inp.cursor is not None and inp.cursor_fresh:
+        # Only lock onto the cursor once it has *settled*.  Tracking a
+        # moving cursor means re-drawing the whole head every step, which
+        # reads as a twitch; a living animal watches what stops moving.
+        if inp.cursor is not None and inp.cursor_settled:
             dx = inp.cursor[0] - ex
             dy = inp.cursor[1] - ey
             if dx * dx + dy * dy <= inp.cursor_radius ** 2:
@@ -157,6 +180,6 @@ class GazeController:
             steps = self.rng.randint(-self.wander_steps, self.wander_steps)
             base = self._idx + steps
             if self.rng.random() < 0.35:
-                base = self.rng.randint(-2, 6)          # a look above the horizon
+                base = self.rng.randint(0, STEPS - 1)   # a look anywhere
             self._wander_target = (base * DEG_PER_DIR) % 360.0
         return self._wander_target

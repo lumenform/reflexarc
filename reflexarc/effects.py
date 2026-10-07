@@ -37,14 +37,14 @@ class Breath:
 
     def update(self, dt: float, energy: float, sleeping: bool,
                laziness: float = 0.5, stress: float = 0.0) -> None:
-        f = 0.16 + 0.24 * energy
+        f = 0.13 + 0.17 * energy          # 8..18 breaths per minute
         f *= (1.15 - 0.30 * laziness)
-        amp = 0.006 + 0.011 * energy
+        amp = 0.006 + 0.010 * energy
         if sleeping:
-            f = 0.12
-            amp *= 1.9
+            f = 0.10
+            amp *= 1.8
         elif stress > 0.5:
-            f *= 1.6              # hot and tense: faster, shallower breathing
+            f *= 1.4              # hot and tense: faster, shallower breathing
             amp *= 0.8
         amp *= self.boost
         self._phase = (self._phase + dt * f) % 1.0
@@ -286,10 +286,10 @@ class EmoteSystem:
         for e in self.items:
             k = min(1.0, e.t / e.dur)
             if e.kind == "heart":
-                x = e.x + 7.0 * math.sin(e.t * 4.5)
-                y = e.y - 34.0 * k * self.scale
+                x = e.x + 6.0 * math.sin(e.t * 2.6)
+                y = e.y - 30.0 * k * self.scale
                 a = 1.0 if k < 0.6 else max(0.0, 1.0 - (k - 0.6) / 0.4)
-                sc = (1.15 - 0.15 * min(1.0, k * 4.0)) * e.size
+                sc = (1.10 - 0.10 * min(1.0, k * 3.0)) * e.size
                 self._blit(painter, self._heart, x, y, a, sc)
             elif e.kind == "zzz":
                 x = e.x + 16.0 * k * self.scale
@@ -313,7 +313,7 @@ class EmoteSystem:
             elif e.kind == "stars":
                 # a dizzy ring of little stars circling above the head
                 fade = 1.0 if k < 0.7 else max(0.0, 1.0 - (k - 0.7) / 0.3)
-                spin = e.t * 5.4
+                spin = e.t * 3.0
                 for j in range(3):
                     a = spin + j * (2.0 * math.pi / 3.0)
                     sx_ = e.x + math.cos(a) * 30.0 * self.scale
@@ -597,8 +597,8 @@ class StatusBubble:
         total = self._until - self._shown_at
         t = now - self._shown_at
         k = t / max(0.001, total)
-        if t < 0.18:
-            sc, alpha = 0.55 + 2.5 * t, min(1.0, t / 0.18)
+        if t < 0.28:
+            sc, alpha = 0.62 + 1.35 * t, min(1.0, t / 0.28)
         elif k > 0.78:
             sc = 1.0
             alpha = max(0.0, 1.0 - (k - 0.78) / 0.22)
@@ -652,16 +652,16 @@ class EmotionBody:
         k = self._t / self._dur
         fade = 1.0 if k < 0.7 else (1.0 - k) / 0.3     # ease out at the end
         if self.kind == "joy":
-            # three quick bounces, flattening into a squash at the bottom
-            b = math.sin(self._t * 2.0 * math.pi * 3.2) * fade
-            return 1.0 - 0.03 * max(0.0, b), 1.0 + 0.05 * b, -6.0 * max(0.0, b)
+            # a couple of unhurried bounces - happy, not jittery
+            b = math.sin(self._t * 2.0 * math.pi * 1.9) * fade
+            return 1.0 - 0.018 * max(0.0, b), 1.0 + 0.030 * b, -4.0 * max(0.0, b)
         if self.kind == "sad":
-            # curled into a small ball, with a fine tremble
-            tremble = 0.006 * math.sin(self._t * 26.0) * fade
-            shrink = 0.90 + 0.02 * min(1.0, k * 4.0)
+            # curled into a small ball, with a slow shiver
+            tremble = 0.004 * math.sin(self._t * 11.0) * fade
+            shrink = 0.92 + 0.015 * min(1.0, k * 4.0)
             return shrink + tremble, shrink - tremble, 0.0
         if self.kind == "bored":
-            sway = 0.02 * math.sin(self._t * 1.9) * fade
+            sway = 0.014 * math.sin(self._t * 1.2) * fade
             return 1.0 + sway, 1.0 - 0.4 * sway, 0.0
         return 1.0, 1.0, 0.0
 
@@ -676,9 +676,11 @@ class FidgetScheduler:
         self.current: Fidget | None = None
 
     def _gap(self, curiosity: float, laziness: float) -> float:
-        base = self.rng.uniform(3.5, 11.0)
+        # spacious by design: a living companion is mostly still, with an
+        # occasional small motion - not a fidget machine
+        base = self.rng.uniform(7.0, 18.0)
         base *= (1.35 - 0.60 * curiosity) * (0.80 + 0.70 * laziness)
-        return max(2.5, base)
+        return max(4.0, base)
 
     def update(self, dt: float, active: bool, curiosity: float = 0.5,
                laziness: float = 0.5) -> Fidget | None:
@@ -699,12 +701,12 @@ class FidgetScheduler:
         self._timer = self._gap(curiosity, laziness)
         r = self.rng.random()
         if r < 0.55:
-            f = Fidget("glance", float(self.rng.choice([-5, -4, 4, 5])), dur=0.75)
+            f = Fidget("glance", float(self.rng.choice([-3, -2, 2, 3])), dur=1.3)
         elif r < 0.75:
-            f = Fidget("breath", dur=3.0)
+            f = Fidget("breath", dur=3.5)
         elif r < 0.92:
-            f = Fidget("stretch", dur=0.48)
+            f = Fidget("stretch", dur=0.7)
         else:
-            f = Fidget("hop", dur=0.55)
+            f = Fidget("hop", dur=0.75)
         self.current = f
         return f
