@@ -18,7 +18,8 @@ from PySide6.QtGui import QAction, QIcon, QPainter
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 from . import desktop
-from .effects import Breath, EmoteDirector, FidgetScheduler, ShadowRenderer
+from .effects import (Breath, EmoteDirector, EmotionBody, FidgetScheduler,
+                      ShadowRenderer, StatusBubble)
 from .gaze import GazeController, GazeInputs
 from .motion import MotionController, MotionRequest
 from .senses import Senses
@@ -30,6 +31,7 @@ from .sprites import (  # noqa: F401  (re-exported for tests and callers)
 # input FSM timings
 ARM_DELAY = 0.18        # hover this long on the silhouette -> arm the grab
 CLICK_MAX_T = 0.35      # shorter press without movement = a pet-pet
+DOUBLE_CLICK_T = 0.55   # second click within this window = status bubble
 DRAG_MIN_PX = 7.0       # movement that turns a press into a drag
 HOLD_STROKE_T = 0.30    # pressed but still this long -> stroking
 HOVER_PET_T = 1.1       # cursor resting on the pet -> a slow stroke
@@ -45,7 +47,7 @@ FIDGET_ROWS = {"idle", "waiting", "review"}
 # window padding around the sprite cell: head-room for emotes, floor-room
 # for the shadow when the pet is airborne (the window follows the pet; the
 # shadow slides down inside it to stay on the ground).  Sized once.
-PAD_X, PAD_TOP, PAD_BOT = 16, 72, 110
+PAD_X, PAD_TOP, PAD_BOT = 16, 100, 110
 
 BLINK_DURATION = 0.12
 
@@ -101,6 +103,7 @@ class PetWindow(QWidget):
 
         self._row = "idle"
         self._frame_idx = 0.0
+        self._t0 = time.time()
         self._last_t = time.time()
         self._senses_tick = 0
         self._paused = False
@@ -119,7 +122,28 @@ class PetWindow(QWidget):
         self._solid_since = 0.0
         self._hover_stroke_t = 0.0
         self._mouse_was_down = False
+        self._last_click_ts = 0.0
         self._cursor = desktop.CursorState(0.0, 0.0, False)
+
+        # --- sounds (short, soft, rate-limited; REFLEXARC_SOUND=0 silences) ---
+        self._no_sound = _os.environ.get("REFLEXARC_SOUND") == "0"
+        self._sound = None
+        if not self._no_sound:
+            try:
+                from .sound import SoundBoard
+                self._sound = SoundBoard()
+            except Exception as exc:      # optional layer
+                print(f"[reflexarc] sound disabled: {exc}", file=sys.stderr)
+
+        # --- status bubble + body language (product layer) ---
+        self._bubble = StatusBubble(scale)
+        self._body = EmotionBody()
+        self._em_sx = 1.0
+        self._em_sy = 1.0
+        self._em_y = 0.0
+        self._panic_until = 0.0
+        self._panic_next = 0.0
+        self._panic_sign = 1
 
         # --- gaze state ---
         self._rng = random.Random()
@@ -159,6 +183,11 @@ class PetWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(33)
+
+        # warm the audio backend shortly after startup so the first real
+        # sound does not block the interaction loop (see SoundBoard.warm)
+        if self._sound is not None:
+            QTimer.singleShot(900, self._sound.warm)
 
     # ------------------------------------------------------------------
     # window position: pet_x/pet_y are the window's top-left corner.  The
@@ -205,6 +234,23 @@ class PetWindow(QWidget):
         return (self.sim.brain.current is Intent.REST
                 and snap.drives.energy < 0.22)
 
+    def _play(self, name: str, cooldown: float = 1.2) -> None:
+        if self._sound is not None:
+            self._sound.play(name, cooldown)
+
+    def _current_need(self) -> str:
+        """What does it want right now?  (double-click answers this)"""
+        d = self.sim.drives
+        p = self.sim.persona
+        scores = {
+            "want_pet": d.social_hunger * (0.55 + 0.9 * p.clinginess),
+            "sleepy": max(0.0, 0.5 - d.energy) * 2.0,
+            "bored": d.boredom * (0.5 + p.curiosity),
+            "stress": d.stress * 1.5,
+        }
+        kind = max(scores, key=lambda k: scores[k])
+        return kind if scores[kind] >= 0.30 else "happy"
+
     def _blink_gap(self) -> float:
         curiosity = getattr(self.sim.persona, "curiosity", 0.5)
         return self._rng.uniform(2.6, 5.4) * (1.15 - 0.5 * curiosity)
@@ -214,6 +260,10 @@ class PetWindow(QWidget):
         lx = (gx - self.x()) / self.scale
         ly = (gy - self.y()) / self.scale
         return self.sprites.hit_mask.contains(lx, ly)
+
+    def _inside_window(self, gx: float, gy: float) -> bool:
+        return (self.x() <= gx < self.x() + self.width()
+                and self.y() <= gy < self.y() + self.height())
 
     # ------------------------------------------------------------------
     def _measure(self, t0: float, tag: str) -> None:
@@ -295,6 +345,15 @@ class PetWindow(QWidget):
         imp = self.motion.consume_impact()
         if imp > 0.12:
             self._emotes.notify_landed(imp)
+        if imp >= 0.55:
+            # a hard fall: dizzy stars orbiting the head, body curls up
+            self._emotes.emotes.spawn(
+                "stars", self._head_local[0],
+                self._head_local[1] - 34 * self.scale)
+            self._body.play("sad", 2.2)
+            self._play("sad", 2.0)
+        elif imp >= 0.25:
+            self._play("land", 1.0)
         if imp >= 0.25:
             self.sim.on_land(imp)
         if pose.hit_wall and row in ("running-left", "running-right"):
@@ -354,8 +413,8 @@ class PetWindow(QWidget):
                 self.breath.boost = 1.8
             elif fid.kind == "stretch":
                 s = math.sin(math.pi * k)
-                self._extra_sx = 1.0 + 0.055 * s
-                self._extra_sy = 1.0 - 0.075 * s
+                self._extra_sx = 1.0 + 0.085 * s
+                self._extra_sy = 1.0 - 0.115 * s
             elif fid.kind == "hop" and fresh:
                 self._fidget_hop = True     # the body hops next physics step
         self._fid_handled = fid
@@ -376,6 +435,23 @@ class PetWindow(QWidget):
             self._emotes.update(
                 dt, energy=d.energy, mood=d.mood, stress=d.stress, cpu=obs.cpu,
                 sleeping=sleeping, head=self._head_local, foot=self._foot_local)
+
+        # startled little glances right after being picked up
+        now = time.time()
+        if now < self._panic_until:
+            if now >= self._panic_next:
+                self._panic_next = now + 0.24
+                self._panic_sign = -self._panic_sign
+                self.gaze.nudge(6 * self._panic_sign, ttl=0.26)
+
+        # body-language layer: the emotion shows in the pose itself
+        self._em_sx, self._em_sy, self._em_y = self._body.update(dt)
+        if (self._body.kind is None and not sleeping
+                and d.boredom > 0.68 and self._rng.random() < 0.004):
+            self._body.play("bored", 3.5)
+
+        # status bubble expiry
+        self._bubble.update(now)
 
     def _logical_rect(self, rect):
         """Physical-pixel rect (senses) -> Qt logical coordinates."""
@@ -398,7 +474,23 @@ class PetWindow(QWidget):
         """
         cur = desktop.cursor()
         self._cursor = cur
-        over = self._over_body(cur.x, cur.y)
+        body_over = self._over_body(cur.x, cur.y)
+        inside = self._inside_window(cur.x, cur.y)
+        over = body_over
+        gap_click = now - self._last_click_ts
+        # just after a click the pet may have hopped out from under the
+        # cursor as its reaction to that click: keep accepting the whole
+        # window for a moment so a double-click still lands
+        if not over and gap_click < DOUBLE_CLICK_T:
+            over = inside
+        if self._debug:
+            sig = (body_over, inside, over, self._grab_state, cur.left_down)
+            if sig != getattr(self, "_ov_sig", None):
+                self._ov_sig = sig
+                print(f"[reflexarc] ov t={now - self._t0:6.2f} body={body_over} "
+                      f"inside={inside} over={over} gap={gap_click:5.2f} "
+                      f"winy={self.y():.0f} cury={cur.y:.0f}",
+                      file=sys.stderr, flush=True)
 
         # hovering (with or without grab arming) is a slow stroke
         if over and not cur.left_down:
@@ -410,6 +502,7 @@ class PetWindow(QWidget):
                 self._hover_stroke_t = now
                 self.sim.on_hover_tick()
                 self._emotes.notify_petted()
+                self._play("happy", 2.4)
         else:
             self._hover_stroke_t = 0.0
 
@@ -446,14 +539,29 @@ class PetWindow(QWidget):
             moved = math.hypot(cur.x - self._press_pos[0],
                                cur.y - self._press_pos[1])
             if not cur.left_down:
+                if self._debug:
+                    print(f"[reflexarc] click: held={now - self._press_t:.2f}s "
+                          f"gap={now - self._last_click_ts:.2f}s "
+                          f"bubble={self._bubble.kind}",
+                          file=sys.stderr, flush=True)
                 if now - self._press_t < CLICK_MAX_T:
-                    self.sim.on_pet()
-                    self._emotes.notify_petted()
+                    if now - self._last_click_ts < DOUBLE_CLICK_T:
+                        # double-click: answer "what do you want right now?"
+                        self._bubble.show(self._current_need(), now)
+                    else:
+                        self.sim.on_pet()
+                        self._emotes.notify_petted()
+                        self._body.play("joy", 1.6)
+                        self._play("happy")
+                    self._last_click_ts = now
                 self._end_grab()
             elif moved > DRAG_MIN_PX:
                 self.motion.grab(cur.x, cur.y)
                 self.sim.on_pick_up()
                 self._emotes.notify_petted()
+                self._play("surprise")
+                self._panic_until = now + 0.9      # startled: quick glances
+                self._panic_next = 0.0
                 self._set_grab_state("grabbed")
             elif now - self._press_t > HOLD_STROKE_T:
                 self.sim.on_hold(dt)     # pressed but still = stroking
@@ -466,11 +574,20 @@ class PetWindow(QWidget):
             else:
                 self.sim.on_hold(dt)
 
-        # watchdog: never leave the window eating clicks by accident
-        if (self._clickthrough.solid and not cur.left_down
-                and not self.motion.held
-                and now - self._solid_since > SOLID_WATCHDOG):
+        # safety net: "solid" is only legal while the interaction state says
+        # so (armed = cursor resting on the pet, pressed, grabbed).  Reaching
+        # idle while still solid means a lost transition - force it back.
+        if self._clickthrough.solid and self._grab_state == "idle":
             self._end_grab()
+
+        if self._debug:
+            sig = (self._grab_state, over, cur.left_down)
+            if sig != getattr(self, "_fsm_sig", None):
+                self._fsm_sig = sig
+                print(f"[reflexarc] fsm: state={self._grab_state} "
+                      f"over={over} down={cur.left_down} "
+                      f"solid={self._clickthrough.solid}",
+                      file=sys.stderr, flush=True)
 
     def _set_grab_state(self, st: str) -> None:
         if self._debug and st != self._grab_state:
@@ -481,7 +598,9 @@ class PetWindow(QWidget):
     def _end_grab(self) -> None:
         self._clickthrough.set_solid(False)
         self._set_grab_state("idle")
-        self._hover_since = 0.0
+        # deliberately keep _hover_since: if the cursor is still on the pet
+        # the window stays pre-armed, so the second click of a double-click
+        # lands immediately instead of being swallowed by a fresh 0.18s wait
 
     def paintEvent(self, event) -> None:  # noqa: N802
         now = time.time()
@@ -521,16 +640,19 @@ class PetWindow(QWidget):
         if self._shake:
             painter.translate(self._shake * math.sin(now * 47.0), 0.0)
         painter.translate(fx, fy)
-        painter.scale(self.breath.sx * self._extra_sx * pose_sx,
-                      self.breath.sy * self._extra_sy * pose_sy)
+        painter.scale(self.breath.sx * self._extra_sx * pose_sx * self._em_sx,
+                      self.breath.sy * self._extra_sy * pose_sy * self._em_sy)
         painter.translate(-fx, -fy)
         painter.drawPixmap(int(PAD_X + dx * self.scale),
-                           int(PAD_TOP + dy * self.scale),
+                           int(PAD_TOP + dy * self.scale + self._em_y),
                            self.sprite_w, self.sprite_h, pm)
 
         # glyphs live in window coordinates, above everything
         painter.resetTransform()
         self._emotes.emotes.draw(painter)
+        if self._bubble.active:
+            self._bubble.draw(painter, now, self._head_local[0],
+                              self._head_local[1] - 92 * self.scale)
         if self._debug:
             self._measure(t0, "paint")
 

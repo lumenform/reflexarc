@@ -52,7 +52,7 @@ class Pose:
 class MotionController:
     GRAVITY = 2800.0     # px/s^2
     HOP_H = 92.0
-    SMALL_HOP_H = 34.0
+    SMALL_HOP_H = 46.0   # fidget hop: visible from the corner of your eye
     # grab spring: soft and slightly under-damped - the pet hangs with
     # weight instead of rigidly following the cursor
     GRAB_K = 260.0
@@ -186,7 +186,10 @@ class MotionController:
                     self.y = self.floor_y
                     self.vy = 0.0
                     self.mode = MotionMode.BASE
-                    self._c = min(0.60, 0.14 + impact_v / 1800.0)
+                    # deep, readable squash: small hops compress ~22%, a big
+                    # drop flattens to ~36% (the exaggerated cartoon landing
+                    # reads as "handfeel" at a glance)
+                    self._c = min(0.72, 0.18 + impact_v / 1600.0)
                     self._cv = 0.0
                     self.impact = min(1.0, impact_v / 1400.0)
 
@@ -214,7 +217,9 @@ class MotionController:
 
         # --- squash-and-stretch spring (grounded; sub-stepped) ---------
         if self.mode is MotionMode.BASE:
-            omega, zeta = 20.0, 0.28
+            # slower and a touch less damped than a strict settle: two or
+            # three visible bounces are what make the landing read as weight
+            omega, zeta = 16.0, 0.23
             steps = max(1, int(math.ceil(omega * dt / 0.15)))
             hdt = dt / steps if steps else 0.0
             for _ in range(steps):
@@ -224,7 +229,7 @@ class MotionController:
 
         return Pose(
             x=self.x, y=self.y, floor_y=self.floor_y, h=self.h,
-            sx=1.0 + 0.50 * self._c, sy=1.0 - 0.45 * self._c,
+            sx=1.0 + 0.55 * self._c, sy=1.0 - 0.50 * self._c,
             impact=self.impact, mode=self.mode.value,
             on_ground=self.mode is MotionMode.BASE and self.h <= 0.0,
             held=self.mode is MotionMode.GRABBED,

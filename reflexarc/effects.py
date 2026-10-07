@@ -119,6 +119,7 @@ class EmoteSystem:
         self._question = self._bake_question(24.0 * s, QColor(125, 170, 235))
         self._drop = self._bake_drop(13.0 * s)
         self._ring = self._bake_ring(48.0 * s, max(3.0, 5.0 * s))
+        self._star = self._bake_star(15.0 * s, QColor(255, 208, 84))
         self.items: list[Emote] = []
 
     # ---- baking ----------------------------------------------------------
@@ -214,6 +215,30 @@ class EmoteSystem:
         return pm
 
     @staticmethod
+    def _bake_star(s: float, color: QColor) -> QPixmap:
+        pm = QPixmap(int(s * 1.3), int(s * 1.3))
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        cx = cy = s * 0.65
+        R, r = s * 0.60, s * 0.26
+        path = QPainterPath()
+        for i in range(10):
+            a = -math.pi / 2.0 + i * math.pi / 5.0
+            rad = R if i % 2 == 0 else r
+            x, y = cx + math.cos(a) * rad, cy + math.sin(a) * rad
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    @staticmethod
     def _bake_ring(size: float, thickness: float) -> QPixmap:
         pm = QPixmap(int(size), int(size))
         pm.fill(Qt.transparent)
@@ -239,7 +264,7 @@ class EmoteSystem:
             return
         d = dur if dur is not None else {
             "heart": 1.5, "zzz": 2.4, "sweat": 1.1,
-            "bang": 0.9, "question": 1.8,
+            "bang": 0.9, "question": 1.8, "stars": 1.9,
         }.get(kind, 1.5)
         self.items.append(Emote(kind, x, y, dur=d, size=size))
 
@@ -285,6 +310,16 @@ class EmoteSystem:
                 y = e.y - 22.0 * k * self.scale
                 a = math.sin(min(1.0, k * 1.3) * math.pi)
                 self._blit(painter, self._question, e.x, y, a, e.size)
+            elif e.kind == "stars":
+                # a dizzy ring of little stars circling above the head
+                fade = 1.0 if k < 0.7 else max(0.0, 1.0 - (k - 0.7) / 0.3)
+                spin = e.t * 5.4
+                for j in range(3):
+                    a = spin + j * (2.0 * math.pi / 3.0)
+                    sx_ = e.x + math.cos(a) * 30.0 * self.scale
+                    sy_ = e.y + math.sin(a) * 9.0 * self.scale
+                    self._blit(painter, self._star, sx_, sy_,
+                               fade * 0.95, e.size)
             elif e.kind == "puff":
                 sc = (0.25 + 1.1 * k) * e.size
                 a = max(0.0, 1.0 - k) * 0.9
@@ -394,6 +429,243 @@ class Fidget:
     dur: float = 0.5
 
 
+# --------------------------------------------------------------------------
+class StatusBubble:
+    """A tiny speech bubble answering "what does it want right now?".
+
+    Shown on double-click.  Icons are hand-drawn (no font dependency) and
+    deliberately minimal - one glance should tell you: wants a pet, sleepy,
+    bored, stressed, or content.
+    """
+
+    KINDS = ("want_pet", "sleepy", "bored", "stress", "happy")
+
+    def __init__(self, scale: float = 1.0) -> None:
+        s = max(0.7, min(2.2, scale))
+        self.scale = s
+        pad = 8.0 * s
+        self._body_w = 46.0 * s
+        self._body_h = 40.0 * s
+        self._pad = pad
+        self._tail = 9.0 * s
+        self._bg = self._bake_bubble(s, pad)
+        icon = 26.0 * s
+        self._icons = {
+            "want_pet": self._bake_icon_heart(icon),
+            "sleepy": self._bake_icon_z(icon * 0.78),
+            "bored": self._bake_icon_dots(icon * 0.9),
+            "stress": self._bake_icon_drop(icon * 0.8),
+            "happy": self._bake_icon_smile(icon),
+        }
+        self.kind: str | None = None
+        self._until = 0.0
+        self._shown_at = 0.0
+
+    # ---- baking ----------------------------------------------------------
+    def _bake_bubble(self, s: float, pad: float) -> QPixmap:
+        w = int(self._body_w + pad * 2)
+        h = int(self._body_h + pad * 2 + self._tail)
+        pm = QPixmap(w, h)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        path = QPainterPath()
+        path.setFillRule(Qt.WindingFill)
+        path.addRoundedRect(QRectF(pad, pad, self._body_w, self._body_h),
+                            13.0 * s, 13.0 * s)
+        tx = pad + self._body_w / 2.0
+        ty = pad + self._body_h
+        tail = QPainterPath()
+        tail.moveTo(tx - 8.0 * s, ty - 8.0 * s)
+        tail.lineTo(tx, ty + self._tail)
+        tail.lineTo(tx + 8.0 * s, ty - 8.0 * s)
+        tail.closeSubpath()
+        path = path.united(tail)
+        p.setBrush(QColor(255, 253, 248, 238))
+        pen = QPen(QColor(96, 84, 72, 235), 2.6 * s)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    @staticmethod
+    def _icon_canvas(size: int) -> tuple[QPixmap, QPainter]:
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        return pm, p
+
+    @classmethod
+    def _bake_icon_heart(cls, size: float) -> QPixmap:
+        s = max(8, int(size))
+        pm, p = cls._icon_canvas(s)
+        path = QPainterPath()
+        x0, y0, k = s * 0.5, s * 0.18, s * 0.64
+        path.moveTo(x0, y0 + 0.72 * k)
+        path.cubicTo(x0 - 0.68 * k, y0 + 0.32 * k, x0 - 0.44 * k,
+                     y0 - 0.14 * k, x0, y0 + 0.14 * k)
+        path.cubicTo(x0 + 0.44 * k, y0 - 0.14 * k, x0 + 0.68 * k,
+                     y0 + 0.32 * k, x0, y0 + 0.72 * k)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(235, 90, 120))
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    @classmethod
+    def _bake_icon_z(cls, size: float) -> QPixmap:
+        s = max(8, int(size))
+        pm, p = cls._icon_canvas(s)
+        pen = QPen(QColor(120, 150, 225), max(2.0, s * 0.16))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(s * 0.18, s * 0.24)
+        path.lineTo(s * 0.82, s * 0.24)
+        path.lineTo(s * 0.18, s * 0.76)
+        path.lineTo(s * 0.82, s * 0.76)
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    @classmethod
+    def _bake_icon_dots(cls, size: float) -> QPixmap:
+        s = max(8, int(size))
+        pm, p = cls._icon_canvas(s)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(150, 150, 160))
+        rr = s * 0.10
+        for i in range(3):
+            p.drawEllipse(QPointF(s * (0.24 + 0.26 * i), s * 0.5), rr, rr)
+        p.end()
+        return pm
+
+    @classmethod
+    def _bake_icon_drop(cls, size: float) -> QPixmap:
+        s = max(8, int(size))
+        pm, p = cls._icon_canvas(s)
+        path = QPainterPath()
+        cx, cy, rr = s * 0.5, s * 0.60, s * 0.27
+        path.moveTo(cx, s * 0.10)
+        path.cubicTo(cx + rr * 1.15, cy - rr * 0.3, cx + rr, cy + rr, cx, cy + rr)
+        path.cubicTo(cx - rr, cy + rr, cx - rr * 1.15, cy - rr * 0.3, cx, s * 0.10)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(120, 180, 230))
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    @classmethod
+    def _bake_icon_smile(cls, size: float) -> QPixmap:
+        s = max(8, int(size))
+        pm, p = cls._icon_canvas(s)
+        pen = QPen(QColor(235, 160, 70), max(2.0, s * 0.14))
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        path.moveTo(s * 0.16, s * 0.40)
+        path.cubicTo(s * 0.30, s * 0.88, s * 0.70, s * 0.88, s * 0.84, s * 0.40)
+        p.drawPath(path)
+        p.end()
+        return pm
+
+    # ---- runtime ---------------------------------------------------------
+    def show(self, kind: str, now: float, dur: float = 3.4) -> None:
+        self.kind = kind
+        self._shown_at = now
+        self._until = now + dur
+
+    def update(self, now: float) -> None:
+        if self.kind is not None and now > self._until:
+            self.kind = None
+
+    @property
+    def active(self) -> bool:
+        return self.kind is not None
+
+    def draw(self, painter: QPainter, now: float, cx: float,
+             bottom_y: float) -> None:
+        """Draw with the tail tip at (cx, bottom_y); bubbles up from there."""
+        if self.kind is None:
+            return
+        total = self._until - self._shown_at
+        t = now - self._shown_at
+        k = t / max(0.001, total)
+        if t < 0.18:
+            sc, alpha = 0.55 + 2.5 * t, min(1.0, t / 0.18)
+        elif k > 0.78:
+            sc = 1.0
+            alpha = max(0.0, 1.0 - (k - 0.78) / 0.22)
+        else:
+            sc, alpha = 1.0, 1.0
+        w = self._bg.width() * sc
+        h = self._bg.height() * sc
+        left = cx - w / 2.0
+        top = bottom_y - h
+        painter.setOpacity(alpha)
+        painter.drawPixmap(QRectF(left, top, w, h), self._bg,
+                           QRectF(0, 0, self._bg.width(), self._bg.height()))
+        ic = self._icons.get(self.kind)
+        if ic is not None:
+            iw = ic.width() * sc
+            ih = ic.height() * sc
+            body_h = (self._body_h + self._pad * 2) * sc
+            painter.drawPixmap(
+                QRectF(cx - iw / 2.0, top + (body_h - ih) / 2.0, iw, ih),
+                ic, QRectF(0, 0, ic.width(), ic.height()))
+        painter.setOpacity(1.0)
+
+
+# --------------------------------------------------------------------------
+class EmotionBody:
+    """Body-language layer: emotions show in the pose, not only overhead.
+
+    joy   - a couple of springy little bounces (being petted)
+    sad   - shrinks into a ball and trembles (after a hard fall)
+    bored - a slow side-to-side sway
+    """
+
+    def __init__(self) -> None:
+        self.kind: str | None = None
+        self._t = 0.0
+        self._dur = 0.0
+
+    def play(self, kind: str, dur: float) -> None:
+        self.kind = kind
+        self._t = 0.0
+        self._dur = dur
+
+    def update(self, dt: float) -> tuple[float, float, float]:
+        """Returns (sx, sy, y_off) modifiers for the draw transform."""
+        if self.kind is None:
+            return 1.0, 1.0, 0.0
+        self._t += dt
+        if self._t >= self._dur:
+            self.kind = None
+            return 1.0, 1.0, 0.0
+        k = self._t / self._dur
+        fade = 1.0 if k < 0.7 else (1.0 - k) / 0.3     # ease out at the end
+        if self.kind == "joy":
+            # three quick bounces, flattening into a squash at the bottom
+            b = math.sin(self._t * 2.0 * math.pi * 3.2) * fade
+            return 1.0 - 0.03 * max(0.0, b), 1.0 + 0.05 * b, -6.0 * max(0.0, b)
+        if self.kind == "sad":
+            # curled into a small ball, with a fine tremble
+            tremble = 0.006 * math.sin(self._t * 26.0) * fade
+            shrink = 0.90 + 0.02 * min(1.0, k * 4.0)
+            return shrink + tremble, shrink - tremble, 0.0
+        if self.kind == "bored":
+            sway = 0.02 * math.sin(self._t * 1.9) * fade
+            return 1.0 + sway, 1.0 - 0.4 * sway, 0.0
+        return 1.0, 1.0, 0.0
+
+
 class FidgetScheduler:
     """Occasional micro-actions during long idles, personality-scaled:
     curiosity makes them more frequent, laziness makes them rarer."""
@@ -404,7 +676,7 @@ class FidgetScheduler:
         self.current: Fidget | None = None
 
     def _gap(self, curiosity: float, laziness: float) -> float:
-        base = self.rng.uniform(4.0, 14.0)
+        base = self.rng.uniform(3.5, 11.0)
         base *= (1.35 - 0.60 * curiosity) * (0.80 + 0.70 * laziness)
         return max(2.5, base)
 
@@ -427,12 +699,12 @@ class FidgetScheduler:
         self._timer = self._gap(curiosity, laziness)
         r = self.rng.random()
         if r < 0.55:
-            f = Fidget("glance", float(self.rng.choice([-4, -3, 3, 4])), dur=0.7)
+            f = Fidget("glance", float(self.rng.choice([-5, -4, 4, 5])), dur=0.75)
         elif r < 0.75:
             f = Fidget("breath", dur=3.0)
         elif r < 0.92:
-            f = Fidget("stretch", dur=0.42)
+            f = Fidget("stretch", dur=0.48)
         else:
-            f = Fidget("hop", dur=0.5)
+            f = Fidget("hop", dur=0.55)
         self.current = f
         return f
