@@ -29,14 +29,6 @@ ReflexArc gives a pet a working reflex arc instead of a script:
 
 The pet never chats. It just *lives* next to you: gets sleepy at 1am, paces when bored, mirrors your deep work, waves when you have been gone too long, gets dizzy when your CPU melts down.
 
-**Real recording, no mockups** (35s: idle -> gaze follow -> petting -> picked
-up and carried -> dropped on its face):
-
-[![demo](docs/demo_life.gif)](docs/demo_life.mp4)
-
-*Full clip: [docs/demo_life.mp4](docs/demo_life.mp4) (2.6 MB) - one continuous
-real screen capture, the pet is that live Python process.*
-
 ## How it comes alive
 
 Most desktop pets are stickers that play animations. Seven layers stacked
