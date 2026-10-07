@@ -2,10 +2,16 @@
 then quit. Also drives a speed-up so several intents appear quickly."""
 from __future__ import annotations
 
+import os
 import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 from pathlib import Path
+
+# this test starts fresh *and* closes the window: never let it overwrite the
+# user's real save under ~/.reflexarc
+os.environ.setdefault(
+    "REFLEXARC_HOME", str(Path(__file__).resolve().parents[1] / "state"))
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication

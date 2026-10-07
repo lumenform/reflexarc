@@ -9,5 +9,6 @@ pets/*
 !pets/.gitkeep
 models/
 docs/demo_real_raw.mp4
+docs/life_demo_raw.mp4
 docs/consult_claude.md
 

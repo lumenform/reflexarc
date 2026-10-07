@@ -21,7 +21,11 @@ jobs:
       - name: Install core dependencies
         run: python -m pip install --upgrade pip
       - name: Import check
-        run: python -c "import reflexarc, reflexarc.sim, reflexarc.brain, reflexarc.drives, reflexarc.personality, reflexarc.senses; print('imports ok')"
+        run: python -c "import reflexarc, reflexarc.sim, reflexarc.brain, reflexarc.drives, reflexarc.personality, reflexarc.senses, reflexarc.gaze, reflexarc.motion; print('imports ok')"
+      - name: Gaze maths
+        run: python -m tests.gaze_math
+      - name: Motion physics
+        run: python -m tests.motion_physics
       - name: Behaviour scenario test
         env:
           REFLEXARC_HOME: ${{ runner.temp }}/reflexarc-ci
