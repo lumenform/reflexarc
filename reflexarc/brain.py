@@ -53,8 +53,8 @@ PETDEX_ROW = {
 # nothing".
 TIMING = {
     Intent.REST: (12, 36, 5),
-    Intent.WALK_LEFT: (2.5, 7.5, 2),
-    Intent.WALK_RIGHT: (2.5, 7.5, 2),
+    Intent.WALK_LEFT: (4.0, 10.0, 2),
+    Intent.WALK_RIGHT: (4.0, 10.0, 2),
     Intent.WATCH_USER: (7, 16, 3),
     Intent.MIRROR_WORK: (5, 14, 3),
     Intent.CHEER: (1.6, 2.8, 6),
@@ -106,7 +106,7 @@ def instinct_scores(obs: Observation, d: Drives, p: Personality) -> dict[Intent,
     walk_base = (
         1.7 * d.boredom * (0.5 + 0.5 * p.curiosity) * d.energy
         + 0.45 * long_idle * (0.4 + 0.6 * p.curiosity) * d.energy
-        + 0.20 * d.energy
+        + 0.55 * d.energy
         - 0.9 * d.stress
     )
     s[Intent.WALK_LEFT] = s[Intent.WALK_RIGHT] = walk_base
@@ -158,7 +158,7 @@ class Decision:
 class Brain:
     def __init__(self, persona: Personality, seed: int | None = None,
                  intuition: IntuitionLayer | None = None,
-                 hysteresis: float = 0.12,
+                 hysteresis: float = 0.22,
                  noise: float = 0.06) -> None:
         self.persona = persona
         self.rng = random.Random(seed)

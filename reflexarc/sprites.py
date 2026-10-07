@@ -38,13 +38,13 @@ ROWS = [
 ROW_FPS = {
     # deliberately unhurried: fast row playback reads as flicker at this
     # size, especially the jumping row which plays while the pet is carried
-    "idle": 5.0,
+    "idle": 4.0,
     "running-right": 8.0,
     "running-left": 8.0,
     "waving": 6.5,
     "jumping": 7.5,
     "failed": 3.2,   # a dizzy faint should look heavy, not twitchy
-    "waiting": 5.0,
+    "waiting": 4.0,
     "running": 8.0,
     "review": 4.5,
 }
@@ -251,9 +251,12 @@ class HitMask:
     test does not flicker while the sprite animates).  Grid coordinates are
     source-cell pixels; lookups are O(1)."""
 
-    def __init__(self, cols: int = 48, rows: int = 52) -> None:
+    def __init__(self, cols: int = 48, rows: int = 52,
+                 cell_w: int = CELL_W, cell_h: int = CELL_H) -> None:
         self.cols = cols
         self.rows = rows
+        self.cell_w = cell_w
+        self.cell_h = cell_h
         self.grid = bytearray(cols * rows)
 
     def add(self, img: QImage) -> None:
@@ -264,8 +267,8 @@ class HitMask:
                 grid[i] = 1
 
     def contains(self, src_x: float, src_y: float) -> bool:
-        gx = int(src_x * self.cols / CELL_W)
-        gy = int(src_y * self.rows / CELL_H)
+        gx = int(src_x * self.cols / self.cell_w)
+        gy = int(src_y * self.rows / self.cell_h)
         if 0 <= gx < self.cols and 0 <= gy < self.rows:
             return bool(self.grid[gy * self.cols + gx])
         return False
@@ -288,9 +291,12 @@ class SpriteSheet:
             raise RuntimeError(f"cannot load spritesheet: {sheet_path}")
         self.meta = meta
         self.image = img
+        # Frame height: pet.json may declare frameWidth/frameHeight for custom
+        # atlases. petdex sheets leave them out - default 192x208 grid.
+        fh = int(meta.get("frameHeight") or 0) or CELL_H
+        self.cell_h = fh
+        self.rows_count = max(1, img.height() // fh)
         self.cell_w = img.width() // FRAMES_PER_ROW
-        self.rows_count = max(1, img.height() // CELL_H)
-        self.cell_h = img.height() // self.rows_count
 
         # ---- the nine classic rows ---------------------------------------
         self.frames: dict[str, list[QPixmap]] = {}
@@ -333,7 +339,7 @@ class SpriteSheet:
             self.frame_bottoms[name] = bottoms
             if name != "failed":
                 votes.extend(b for b in bottoms if b is not None)
-        self.ground_y = float(statistics.mode(votes)) if votes else float(CELL_H - 6)
+        self.ground_y = float(statistics.mode(votes)) if votes else float(self.cell_h - 6)
 
         # per-frame foot centre (x) - used to pin every frame to one anchor
         self.foot_cx: dict[str, list[float]] = {}
@@ -345,7 +351,7 @@ class SpriteSheet:
                 cx_list.append((span[0] + span[1]) / 2.0 if span else -1.0)
             self.foot_cx[name] = cx_list
         idle_cx = [v for v in self.foot_cx.get("idle", []) if v >= 0]
-        self.anchor_src_x = statistics.median(idle_cx) if idle_cx else CELL_W / 2.0
+        self.anchor_src_x = statistics.median(idle_cx) if idle_cx else self.cell_w / 2.0
 
         # body box of the first idle frame: drives eye anchor and body width
         bbox = _opaque_bbox(self._qimages["idle"][0]) if "idle" in self._qimages else None
@@ -357,7 +363,7 @@ class SpriteSheet:
             self.eye_anchor = (self.anchor_src_x, t + _HEAD_FRAC * (b - t))
         else:
             self.body_box = None
-            self.body_w = CELL_W * 0.6
+            self.body_w = self.cell_w * 0.6
             self.eye_anchor = (self.anchor_src_x, self.cell_h * 0.42)
 
         # blink frame: the idle frame closest to frame 0 that still differs
@@ -370,10 +376,12 @@ class SpriteSheet:
             grids = [_color_grid(im) for im in idle_imgs]
             base_grid = grids[0]
             diffs = [_grid_diff(g, base_grid) for g in grids[1:]]
-            nonzero = [d for d in diffs if d > 0]
-            if nonzero:
-                limit = 0.5 * max(nonzero)
-                best = min((d, i + 1) for i, d in enumerate(diffs) if 0 < d <= limit)
+            # pick the smallest non-zero difference: the frame whose body is
+            # most identical to frame 0 is the closed-eye drawing. (A ratio
+            # filter here would crash when every diff is large - robustness.)
+            best = min(((d, i + 1) for i, d in enumerate(diffs) if d > 0),
+                       default=None)
+            if best is not None:
                 self.blink_frames = [best[1]]
 
         # alignment of a blink frame against look[0] (they are not the same
@@ -385,11 +393,11 @@ class SpriteSheet:
             a = _sample_grid(look0)
             b = _sample_grid(blink0)
             dx, dy, _ = _best_align(a, b, 48, 52)
-            self.blink_align = (int(dx * CELL_W / 48), int(dy * CELL_H / 52))
+            self.blink_align = (int(dx * self.cell_w / 48), int(dy * self.cell_h / 52))
 
         # silhouette mask: union of idle + look frames (what the pet wears
         # 90% of the time)
-        self.hit_mask = HitMask()
+        self.hit_mask = HitMask(cell_w=self.cell_w, cell_h=self.cell_h)
         for im in self._qimages["idle"]:
             self.hit_mask.add(im)
         for pm in self.look_frames:

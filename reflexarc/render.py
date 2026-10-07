@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 from . import desktop
@@ -50,7 +50,7 @@ FIDGET_ROWS = {"idle", "waiting", "review"}
 PAD_X, PAD_TOP, PAD_BOT = 16, 100, 110
 
 BLINK_DURATION = 0.12
-CROSSFADE_T = 0.11      # rows cross-fade instead of hard-cutting
+CROSSFADE_T = 0.35      # rows cross-fade instead of hard-cutting
 
 
 class PetWindow(QWidget):
@@ -61,8 +61,14 @@ class PetWindow(QWidget):
         self.scale = scale
         self.sprite_w = int(round(self.sprites.cell_w * scale))
         self.sprite_h = int(round(self.sprites.cell_h * scale))
-        self.w = self.sprite_w + 2 * PAD_X
-        self.h = self.sprite_h + PAD_TOP + PAD_BOT
+        # padding scales with the cell height so head-room (emotes) and
+        # floor-room (shadow) stay proportional on custom frame sizes
+        pad_k = self.sprites.cell_h / 208.0
+        self._pad_x = int(round(PAD_X * pad_k))
+        self._pad_top = int(round(PAD_TOP * pad_k))
+        self._pad_bot = int(round(PAD_BOT * pad_k))
+        self.w = self.sprite_w + 2 * self._pad_x
+        self.h = self.sprite_h + self._pad_top + self._pad_bot
 
         self.setWindowTitle("ReflexArc")
         self.setWindowFlags(
@@ -76,11 +82,11 @@ class PetWindow(QWidget):
         self.resize(self.w, self.h)
 
         # foot anchor inside the window (source pixels -> window px)
-        self._foot_local = (PAD_X + self.sprites.anchor_src_x * scale,
-                            PAD_TOP + self.sprites.ground_y * scale)
+        self._foot_local = (self._pad_x + self.sprites.anchor_src_x * scale,
+                            self._pad_top + self.sprites.ground_y * scale)
         # head anchor (emote source) inside the window
-        self._head_local = (PAD_X + self.sprites.eye_anchor[0] * scale,
-                            PAD_TOP + self.sprites.eye_anchor[1] * scale)
+        self._head_local = (self._pad_x + self.sprites.eye_anchor[0] * scale,
+                            self._pad_top + self.sprites.eye_anchor[1] * scale)
 
         # position: restore saved or start bottom-right; the saved x was the
         # *sprite* corner in older versions, so shift it by the padding
@@ -88,13 +94,13 @@ class PetWindow(QWidget):
         import os as _os
         fx = _os.environ.get("REFLEXARC_FORCE_X")
         fy = _os.environ.get("REFLEXARC_FORCE_Y")
-        default_x = screen.right() - 80 - PAD_X - self.sprite_w
-        default_y = screen.bottom() - 8 - PAD_TOP - self.sprite_h
+        default_x = screen.right() - 80 - self._pad_x - self.sprite_w
+        default_y = screen.bottom() - 8 - self._pad_top - self.sprite_h
         if fx is not None and fy is not None:
             self._pet_x = float(fx)
             self.pet_y = float(fy)
         elif "x" in self.sim.extra:
-            self._pet_x = float(self.sim.extra["x"]) - PAD_X
+            self._pet_x = float(self.sim.extra["x"]) - self._pad_x
             self.pet_y = default_y
         else:
             self._pet_x = float(default_x)
@@ -116,6 +122,20 @@ class PetWindow(QWidget):
         self._no_grab = bool(_os.environ.get("REFLEXARC_NO_GRAB"))
         self._no_breath = _os.environ.get("REFLEXARC_BREATH") == "0"
         self._no_emotes = _os.environ.get("REFLEXARC_EMOTES") == "0"
+
+        # --- hand cursor: replace the arrow with a "hand" when near the pet ---
+        self._hand_cursor = None
+        self._grab_cursor = None
+        try:
+            data_dir = Path(__file__).resolve().parent / "data"
+            open_pm = QPixmap(str(data_dir / "cursor_open.png"))
+            grab_pm = QPixmap(str(data_dir / "cursor_grab.png"))
+            # hot spot: fingertips (top-left of the hand image)
+            self._hand_cursor = QCursor(open_pm, hotX=10, hotY=12)
+            self._grab_cursor = QCursor(grab_pm, hotX=12, hotY=14)
+            self._cursor_active = False
+        except Exception:
+            self._hand_cursor = None
         self._grab_state = "idle"      # idle | armed | pressed | grabbed
         self._hover_since = 0.0
         self._press_t = 0.0
@@ -347,7 +367,7 @@ class PetWindow(QWidget):
                 # lock on only after the cursor settles; a moving cursor
                 # would mean re-drawing the head every step (the flicker a
                 # scene-change count flagged: 5 jumps per second)
-                cursor_settled=0.35 <= obs.idle_seconds < 4.0,
+                cursor_settled=0.5 <= obs.idle_seconds < 8.0,
                 fg_rect=self._logical_rect(obs.fg_rect),
                 held=held,
                 drowsy=self._drowsiness(snap),
@@ -406,6 +426,8 @@ class PetWindow(QWidget):
         if pose.held or pose.mode == "air":
             final_row = "jumping"       # legs out: a leaping, dangling pose
             self._gaze_active = False
+            if pose.held:
+                self.gaze.override(90.0, ttl=0.2)  # look up at the hand
         if final_row != self._row:
             # capture the outgoing picture so the two rows can cross-fade
             self._prev_draw = self._current_sprite(now)
@@ -490,7 +512,7 @@ class PetWindow(QWidget):
         now = time.time()
         if now < self._panic_until:
             if now >= self._panic_next:
-                self._panic_next = now + 0.55
+                self._panic_next = now + 1.2
                 self._panic_sign = -self._panic_sign
                 self.gaze.nudge(2 * self._panic_sign, ttl=0.7)
 
@@ -555,6 +577,22 @@ class PetWindow(QWidget):
                 self._play("happy", 2.4)
         else:
             self._hover_stroke_t = 0.0
+
+        # --- swap the system cursor for a "hand" when interacting with the pet ---
+        want_hand = over or self._grab_state in ("armed", "pressed", "grabbed")
+        if want_hand:
+            c = self._grab_cursor if self._grab_state in ("pressed", "grabbed") else self._hand_cursor
+            if c is not None and not self._cursor_active:
+                QApplication.setOverrideCursor(c)
+                self._cursor_active = True
+            elif c is not None and self._cursor_active:
+                QApplication.restoreOverrideCursor()
+                QApplication.setOverrideCursor(c)
+                self._cursor_active = True
+        else:
+            if self._cursor_active:
+                QApplication.restoreOverrideCursor()
+                self._cursor_active = False
 
         if self._no_grab:
             if (over and cur.left_down and not self._mouse_was_down
@@ -655,6 +693,12 @@ class PetWindow(QWidget):
     def _current_sprite(self, now: float | None = None):
         """(pixmap, source dx, dy) for whatever should be on screen now."""
         now = time.time() if now is None else now
+        # when grabbed: show a 3/4 side look frame (like hanging from a scruff)
+        if getattr(self._pose, "held", False) and self.sprites.has_look:
+            side_idx = 4  # 45deg turned away, 3/4 side view
+            pm = self.sprites.look(side_idx)
+            dx, dy = self.sprites.draw_offset("look", side_idx)
+            return pm, dx, dy
         if self._gaze_active and self.sprites.blink_frames and now < self._blink_until:
             idx = self.sprites.blink_frames[0]
             pm = self.sprites.frame("idle", idx)
@@ -695,22 +739,28 @@ class PetWindow(QWidget):
         fx, fy = self._foot_local
         if self._shake:
             painter.translate(self._shake * math.sin(now * 47.0), 0.0)
+        # when grabbed: stretch vertically (suspended) and dangle gently
+        grabbed = pose.held if pose else False
+        sway = 0.0
+        if grabbed:
+            # gentle pendulum sway while dangling (no deformation)
+            sway = math.sin(now * 3.5) * 3.0 * self.scale
         painter.translate(fx, fy)
         painter.scale(self.breath.sx * self._extra_sx * pose_sx * self._em_sx,
                       self.breath.sy * self._extra_sy * pose_sy * self._em_sy)
-        painter.translate(-fx, -fy)
+        painter.translate(-fx + sway, -fy)
         # cross-fade from the outgoing row: a hard cut between animations
         # reads as a flicker, a short blend reads as the pet *changing pose*
         if self._prev_draw is not None and self._cross_t < CROSSFADE_T:
             k = max(0.0, min(1.0, self._cross_t / CROSSFADE_T))
             ppm, pdx, pdy = self._prev_draw
             painter.setOpacity(1.0 - k)
-            painter.drawPixmap(int(PAD_X + pdx * self.scale),
-                               int(PAD_TOP + pdy * self.scale + self._em_y),
+            painter.drawPixmap(int(self._pad_x + pdx * self.scale),
+                               int(self._pad_top + pdy * self.scale + self._em_y),
                                self.sprite_w, self.sprite_h, ppm)
             painter.setOpacity(k)
-        painter.drawPixmap(int(PAD_X + dx * self.scale),
-                           int(PAD_TOP + dy * self.scale + self._em_y),
+        painter.drawPixmap(int(self._pad_x + dx * self.scale),
+                           int(self._pad_top + dy * self.scale + self._em_y),
                            self.sprite_w, self.sprite_h, pm)
         painter.setOpacity(1.0)
 
@@ -726,6 +776,8 @@ class PetWindow(QWidget):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802
+        if getattr(self, "_cursor_active", False):
+            QApplication.restoreOverrideCursor()
         self.sim.extra["x"] = self.pet_x
         self.sim.save()
         super().closeEvent(event)

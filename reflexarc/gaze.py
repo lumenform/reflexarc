@@ -65,12 +65,12 @@ class GazeInputs:
     drowsy: float = 0.0            # 0..1, pulls the gaze down
     sleepy: bool = False           # fully asleep: head down
     cursor_radius: float = 520.0   # notice the cursor within this distance
-    wander_gap: tuple[float, float] = (4.5, 10.0)   # unhurried gaze drift
+    wander_gap: tuple[float, float] = (9.0, 18.0)   # unhurried gaze drift
 
 
 class GazeController:
-    def __init__(self, seed: int | None = None, max_deg_per_s: float = 120.0,
-                 step_hyst: float = 0.30, wander_steps: int = 2) -> None:
+    def __init__(self, seed: int | None = None, max_deg_per_s: float = 80.0,
+                 step_hyst: float = 0.35, wander_steps: int = 1) -> None:
         self.rng = random.Random(seed)
         self.max_deg_per_s = max_deg_per_s
         self.step_hyst = step_hyst
